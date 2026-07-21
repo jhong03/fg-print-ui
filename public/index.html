@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JTC Lookup</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <!-- Search / scan -->
+    <section class="search" id="searchArea">
+      <div class="search__head">
+        <label for="jtcInput" class="search__label">JTC No</label>
+        <button id="reloadTplBtn" class="linkbtn" type="button" title="Re-fetch the label design from MES">Reload template</button>
+      </div>
+      <div class="search__box">
+        <input
+          id="jtcInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Type or scan a JTC number…"
+          aria-label="JTC number"
+        />
+        <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </section>
+
+    <!-- Label preview -->
+    <section class="stage" id="stage">
+      <div class="empty" id="emptyState">
+        <p>Select a JTC number to view its job details.</p>
+      </div>
+
+      <div class="label" id="label" hidden>
+        <div id="labelMount" class="labelmount"></div>
+      </div>
+
+      <div class="actions" id="actions" hidden>
+        <button id="printBtn" class="btn" type="button">Print label</button>
+        <button id="previewBtn" class="btn btn--ghost" type="button">Preview TSPL</button>
+        <button id="clearBtn" class="btn btn--ghost" type="button">Clear</button>
+      </div>
+
+      <div class="tspl" id="tsplPanel" hidden>
+        <div class="tspl__bar">
+          <span class="tspl__title">Printer code · TSPL</span>
+          <button id="tsplCopy" class="tspl__copy" type="button">Copy</button>
+        </div>
+        <pre id="tsplView" class="tspl__code"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/vendor/JsBarcode.all.min.js"></script>
+  <script src="labelPreview.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

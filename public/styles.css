@@ -1,0 +1,257 @@
+/* -------------------------------------------------------------------------
+   Minimal, calm operator UI. Neutral palette, generous spacing, no motion
+   beyond a subtle focus ring. Two type systems: a clean sans for the app
+   chrome, a monospace for the label so it matches the printed slip.
+   ------------------------------------------------------------------------- */
+
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --ink: #1f2328;
+  --ink-soft: #6b7280;
+  --line: #e2e4e8;
+  --line-strong: #111418;
+  --accent: #2f6b4f;      /* muted green, low-stimulation */
+  --accent-soft: #eaf2ee;
+  --danger: #b4302a;
+  --radius: 10px;
+  --mono: "Courier New", ui-monospace, "Cascadia Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px 80px;
+}
+
+/* ---- Search ---- */
+.search { margin-bottom: 32px; }
+
+.search__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.search__label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.linkbtn {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linkbtn:hover { color: var(--accent); }
+.linkbtn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+
+.search__box { position: relative; }
+
+#jtcInput {
+  width: 100%;
+  padding: 16px 18px;
+  font-size: 1.25rem;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+#jtcInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Suggestions dropdown */
+.suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  z-index: 10;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.suggestions li {
+  padding: 12px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.suggestions li[aria-selected="true"],
+.suggestions li:hover {
+  background: var(--accent-soft);
+}
+.suggestions .s-jtc {
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.suggestions .s-part {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.suggestions .s-empty {
+  padding: 14px;
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+.status {
+  min-height: 1.2em;
+  margin: 10px 2px 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+.status.error { color: var(--danger); }
+
+/* ---- Stage ---- */
+.empty {
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+/* ---- Label preview (drawn to scale from the template geometry) ---- */
+.label {
+  color: #000;
+}
+.labelmount {
+  width: 100%;
+}
+.labelsvg {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.08));
+}
+.labelmount__err {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--danger);
+  background: #fff;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+/* ---- Actions ---- */
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 22px;
+}
+.btn {
+  padding: 12px 22px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.btn:hover { filter: brightness(1.05); }
+.btn:active { filter: brightness(0.95); }
+.btn--ghost {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+.btn--ghost:hover { background: #eef0f2; }
+
+/* ---- TSPL preview panel ---- */
+.tspl {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #1f2328;
+}
+.tspl__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #2a2f36;
+  border-bottom: 1px solid #3a3f47;
+}
+.tspl__title {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #aeb4bd;
+}
+.tspl__copy {
+  font-size: 0.8rem;
+  color: #d6dae0;
+  background: transparent;
+  border: 1px solid #454b54;
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.tspl__copy:hover { background: #363b43; }
+.tspl__code {
+  margin: 0;
+  padding: 14px 16px;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: #e6e9ed;
+  white-space: pre;
+}
+
+/* -------------------------------------------------------------------------
+   Print: show only the label, at a clean size, nothing else.
+   ------------------------------------------------------------------------- */
+@media print {
+  html, body { background: #fff; }
+  .page { max-width: none; padding: 0; margin: 0; }
+  .search, .actions, .empty, .tspl { display: none !important; }
+  .label {
+    border: none;
+    border-radius: 0;
+    padding: 6mm 8mm;
+  }
+}
