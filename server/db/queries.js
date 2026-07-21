@@ -69,6 +69,10 @@ module.exports = {
     `,
     // Full record for one job. $1 may be either the JTC No (ordernumber) or the
     // barcode id — so scanning the printed label's barcode resolves the job too.
+    // jtc_maps_jp is a snapshot/history table (many rows per order); the ORDER BY
+    // + LIMIT 1 picks the LATEST snapshot so the label reflects current data
+    // (not an arbitrary old one). It sorts only the matched order's rows, so it
+    // stays fast.
     getOne: `
       SELECT
         c.name              AS "customer",
@@ -86,6 +90,7 @@ module.exports = {
       LEFT JOIN public.jtc_maps_jp  jp ON jp."jtc_orderNumber" = j.ordernumber
       WHERE btrim(j.ordernumber) = btrim($1)
          OR jp."jtc_barcodeId"::text = btrim($1)
+      ORDER BY jp."jtc_createdAt" DESC NULLS LAST, jp."jtc_id" DESC
       LIMIT 1
     `,
   },
