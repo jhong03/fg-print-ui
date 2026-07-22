@@ -15,12 +15,15 @@
 // Approx TSC internal font cell size (dots @203dpi): [width, height].
 const FONT_W = { 1: 8, 2: 12, 3: 16, 4: 24, 5: 32 };
 const FONT_H = { 1: 12, 2: 20, 3: 24, 4: 32, 5: 48 };
-const MARGIN = 6;      // dots of breathing room before an obstacle
+const MARGIN = 24;     // dots of breathing room before an obstacle (~3 mm)
 const LINE_FACTOR = 1.15;
 
 function fontH(el) {
   return (FONT_H[el.font] || 20) * (el.yMul || 1);
 }
+
+// Approx height of the human-readable digits TSPL prints alongside a barcode.
+const BARCODE_HR = 24;
 
 // The x-range an element occupies (perpendicular to text flow).
 function xBand(el) {
@@ -28,7 +31,9 @@ function xBand(el) {
     case 'text': return [el.x, el.x + fontH(el)];
     case 'bar':
     case 'box': return [el.x, el.x + (el.width || 0)];
-    case 'barcode': return [el.x, el.x + (el.height || 0)];
+    // The human-readable digits sit past the bars, and block just as much.
+    case 'barcode':
+      return [el.x, el.x + (el.height || 0) + (el.humanReadable ? BARCODE_HR : 0)];
     default: return [el.x, el.x];
   }
 }
@@ -57,19 +62,27 @@ function availableWidth(el, elements) {
   return el.y - boundary - MARGIN;
 }
 
-function wrap(text, maxChars) {
-  const limit = Math.max(1, maxChars);
+/*
+ * Greedy wrap. `limitFor(i)` gives the character limit for line i — each line
+ * gets its own, because wrapped lines sit further down the label and can run
+ * into obstacles the first line clears.
+ */
+function wrap(text, limitFor) {
   const lines = [];
   let cur = '';
+  const limit = () => Math.max(1, limitFor(lines.length));
+
   for (let word of text.split(' ')) {
-    // Hard-break a single word longer than the line.
-    while (word.length > limit) {
-      if (cur) { lines.push(cur); cur = ''; }
-      lines.push(word.slice(0, limit));
-      word = word.slice(limit);
+    // Hard-break a single word longer than its line.
+    while (word.length > limit()) {
+      // Flush first — the next line may have a different limit.
+      if (cur) { lines.push(cur); cur = ''; continue; }
+      const n = limit();
+      lines.push(word.slice(0, n));
+      word = word.slice(n);
     }
     if (cur === '') cur = word;
-    else if ((cur + ' ' + word).length <= limit) cur += ' ' + word;
+    else if ((cur + ' ' + word).length <= limit()) cur += ' ' + word;
     else { lines.push(cur); cur = word; }
   }
   if (cur !== '') lines.push(cur);
@@ -82,12 +95,17 @@ function wrap(text, maxChars) {
  */
 function layoutText(el, text, elements) {
   const charW = (FONT_W[el.font] || 12) * (el.xMul || 1);
-  const maxChars = Math.floor(availableWidth(el, elements) / charW);
-  if ((text || '').length <= maxChars || !text) {
+  const lineH = Math.round(fontH(el) * LINE_FACTOR);
+  // Line i is one line-height further along +x, so it is measured against the
+  // obstacles at THAT position — not line 0's.
+  const limitFor = (i) => Math.floor(
+    availableWidth(i === 0 ? el : { ...el, x: el.x + i * lineH }, elements) / charW
+  );
+
+  if (!text || text.length <= limitFor(0)) {
     return [{ x: el.x, y: el.y, text: text || '' }];
   }
-  const lineH = Math.round(fontH(el) * LINE_FACTOR);
-  return wrap(text, maxChars).map((t, i) => ({
+  return wrap(text, limitFor).map((t, i) => ({
     x: el.x + i * lineH,
     y: el.y,
     text: t,

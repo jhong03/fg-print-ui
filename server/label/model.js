@@ -5,7 +5,7 @@
  * label geometry — same coordinate system the TSPL uses.
  */
 
-const { resolveValue } = require('./render');
+const { resolveValue, placedElements } = require('./render');
 const { mapRecordToFields } = require('./mapRecord');
 const { layoutText } = require('./textLayout');
 const { hasBarcodeData, centeredBarcode } = require('./barcodeLayout');
@@ -19,6 +19,9 @@ function buildModel(template, record) {
   const heightDots = Math.round((L.heightMm || 0) * dotsPerMm);
 
   const src = template.elements || [];
+  // Wrap against the printed positions, exactly as renderTspl does, so the
+  // preview's line breaks match the label's.
+  const placed = placedElements(src, values);
   const elements = [];
   for (const el of src) {
     const base = { type: el.type, x: el.x, y: el.y, rotation: el.rotation || 0 };
@@ -28,7 +31,7 @@ function buildModel(template, record) {
         const xMul = el.xMul || 1;
         const yMul = el.yMul || 1;
         // Expand into one entry per wrapped line (same wrapping as the TSPL).
-        for (const seg of layoutText(el, resolveValue(el, values), src)) {
+        for (const seg of layoutText(el, resolveValue(el, values), placed)) {
           elements.push({ ...base, x: seg.x, y: seg.y, font, xMul, yMul, text: seg.text });
         }
         break;
