@@ -23,13 +23,64 @@ let debounceTimer = null;
 // ---- Setup ----------------------------------------------------------------
 input.focus();
 
+// ---- Scan detection -------------------------------------------------------
+/*
+ * A scanned code arrives as a whole value, not one character at a time — either
+ * as a paste (Ctrl+V, or a scanner in clipboard mode) or as a burst of
+ * keystrokes far faster than anyone can type. Either way we accept it straight
+ * away instead of waiting for Enter. Hand-typing still gets the suggestion list.
+ */
+const SCAN_GAP_MS = 40;    // max ms between keystrokes to still count as a burst
+const SCAN_MIN_LEN = 4;    // a burst must be this long before it counts as a scan
+const SCAN_SETTLE_MS = 60; // wait this long for more characters before accepting
+let pasted = false;
+let burstLen = 0;
+let lastCharAt = 0;
+
+input.addEventListener('paste', () => { pasted = true; });
+
 // ---- Search / suggestions -------------------------------------------------
-input.addEventListener('input', () => {
+input.addEventListener('input', (e) => {
   const q = input.value.trim();
+  const now = performance.now();
+  const gap = now - lastCharAt;
+  lastCharAt = now;
+  burstLen = gap < SCAN_GAP_MS ? burstLen + 1 : 1;
+
   clearTimeout(debounceTimer);
-  if (!q) { hideSuggestions(); return; }
-  debounceTimer = setTimeout(() => runSearch(q), 180);
+  if (!q) { pasted = false; burstLen = 0; hideSuggestions(); return; }
+
+  const isScan = pasted || e.inputType === 'insertFromPaste' || burstLen >= SCAN_MIN_LEN;
+  pasted = false;
+  debounceTimer = isScan
+    ? setTimeout(() => acceptScan(q), SCAN_SETTLE_MS)
+    : setTimeout(() => runSearch(q), 180);
 });
+
+/*
+ * Auto-accept a scanned/pasted value. `no=` resolves either a JTC No or a
+ * barcode id, so both forms load directly. If the DB doesn't know it, fall back
+ * to the suggestion list rather than showing a "not found" dead end.
+ */
+async function acceptScan(q) {
+  if (input.value.trim() !== q) return;   // superseded while we waited
+  hideSuggestions();
+  setStatus('Loading ' + q + '…');
+  let record;
+  try {
+    record = await loadJtc(q);
+  } catch (err) {
+    setStatus(err.message, true);
+    return;
+  }
+  if (input.value.trim() !== q) return;   // operator typed/scanned again
+  if (!record) { setStatus(''); runSearch(q); return; }
+  // Show the resolved JTC No — a scanned barcode id isn't the order number.
+  input.value = record.jtcNo || q;
+  renderLabel(record);
+  setStatus('');
+  input.select();   // leave it selected so the next scan replaces it
+}
 
 async function runSearch(q) {
   try {
@@ -118,22 +169,29 @@ function highlight(items) {
 }
 
 // ---- Load + render a record -----------------------------------------------
+// Fetches one record. Returns null when the JTC simply isn't there (404);
+// throws for real failures so callers can report them.
+async function loadJtc(jtcNo) {
+  const res = await fetch('/api/jtc?no=' + encodeURIComponent(jtcNo));
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Lookup failed');
+  }
+  return res.json();
+}
+
 async function selectJtc(jtcNo) {
   hideSuggestions();
   input.value = jtcNo;
   setStatus('Loading ' + jtcNo + '…');
   try {
-    const res = await fetch('/api/jtc?no=' + encodeURIComponent(jtcNo));
-    if (res.status === 404) {
+    const record = await loadJtc(jtcNo);
+    if (!record) {
       showEmpty();
       setStatus('No job found for ' + jtcNo, true);
       return;
     }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || 'Lookup failed');
-    }
-    const record = await res.json();
     renderLabel(record);
     setStatus('');
   } catch (e) {
