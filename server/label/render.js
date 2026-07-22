@@ -41,6 +41,39 @@ function normAngle(r) {
 }
 
 /*
+ * Label variants.
+ *
+ * Some labels want the QC CHOP box (a blank square to stamp), some don't.
+ * Rather than keeping two MES templates in sync, 'plain' drops the box and its
+ * caption from whichever template we were handed; 'qc' leaves it alone.
+ *
+ * Dropping the box MOVES THE BARCODE — centeredBarcode aligns it with the box
+ * and falls back to a fixed centre when there is none. That is why each variant
+ * carries its own BARCODE_NUDGE_DOTS_*: tune each once, then toggle freely.
+ */
+const QC_CAPTION = /^\s*QC\s*CHOP\s*$/i;
+
+function isQcCaption(el) {
+  const v = el.value || {};
+  return el.type === 'text' && v.kind === 'static' && QC_CAPTION.test(v.text || '');
+}
+
+function boxArea(b) {
+  return (b.width || 0) * (b.height || 0);
+}
+
+function applyVariant(elements, variant) {
+  if (variant !== 'plain') return elements;
+  // The QC CHOP box is the largest box — the same rule barcodeLayout uses to
+  // pick what the barcode centres under, so the two always agree.
+  const boxes = elements.filter((e) => e.type === 'box');
+  const qcBox = boxes.length
+    ? boxes.reduce((a, b) => (boxArea(a) >= boxArea(b) ? a : b))
+    : null;
+  return elements.filter((el) => el !== qcBox && !isQcCaption(el));
+}
+
+/*
  * The element list AS PRINTED, for text wrapping to measure against.
  *
  * Two things make the template's own list the wrong thing to measure:
@@ -155,7 +188,9 @@ function renderTspl(template, values = {}, opts = {}) {
     : Number(process.env.BARCODE_NUDGE_DOTS || 0);
   const lines = [];
 
-  const elements = template.elements || [];
+  // Drop the QC CHOP block first, so wrapping and barcode centring both see
+  // the label as it will actually print.
+  const elements = applyVariant(template.elements || [], opts.variant);
   const heightDots = Math.round((L.heightMm || 0) * (L.dpi || 203) / 25.4);
   const U = makeUpright(elements, heightDots);
 
@@ -181,4 +216,4 @@ function renderTspl(template, values = {}, opts = {}) {
   return lines.join('\n') + '\n';
 }
 
-module.exports = { renderTspl, resolveValue, placedElements };
+module.exports = { renderTspl, resolveValue, placedElements, applyVariant };

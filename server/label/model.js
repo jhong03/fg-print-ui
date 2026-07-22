@@ -5,12 +5,12 @@
  * label geometry — same coordinate system the TSPL uses.
  */
 
-const { resolveValue, placedElements } = require('./render');
+const { resolveValue, placedElements, applyVariant } = require('./render');
 const { mapRecordToFields } = require('./mapRecord');
 const { layoutText } = require('./textLayout');
 const { hasBarcodeData, centeredBarcode } = require('./barcodeLayout');
 
-function buildModel(template, record) {
+function buildModel(template, record, opts = {}) {
   const values = mapRecordToFields(record);
   const L = template.label || {};
   const dpi = L.dpi || 203;
@@ -18,7 +18,8 @@ function buildModel(template, record) {
   const widthDots = Math.round((L.widthMm || 0) * dotsPerMm);
   const heightDots = Math.round((L.heightMm || 0) * dotsPerMm);
 
-  const src = template.elements || [];
+  // Same variant the printer gets, so the preview shows what comes out.
+  const src = applyVariant(template.elements || [], opts.variant);
   // Wrap against the printed positions, exactly as renderTspl does, so the
   // preview's line breaks match the label's.
   const placed = placedElements(src, values);

@@ -17,15 +17,33 @@ const COMPANY_NAME = process.env.COMPANY_NAME || 'YOLLINK INDUSTRIES SDN BHD';
 // Data source has no unit-of-measure column, so the label falls back to this.
 const DEFAULT_UOM = process.env.DEFAULT_UOM || 'PCS';
 
-// Barcode print calibration, read LIVE from .env each time so operators can tune
-// it and reprint without restarting the app. Falls back to the startup value.
+// Print settings are read LIVE from .env on every request, so operators can
+// tune or toggle and reprint without restarting. Falls back to the startup value.
 const ENV_PATH = path.join(__dirname, '..', '.env');
-function getBarcodeNudge() {
+function liveEnv(key) {
   try {
-    const m = /^\s*BARCODE_NUDGE_DOTS\s*=\s*(-?\d+)/m.exec(fs.readFileSync(ENV_PATH, 'utf8'));
-    if (m) return Number(m[1]);
+    const m = new RegExp(`^\\s*${key}\\s*=\\s*(\\S+)`, 'm').exec(fs.readFileSync(ENV_PATH, 'utf8'));
+    if (m) return m[1];
   } catch (_) { /* fall back below */ }
-  return Number(process.env.BARCODE_NUDGE_DOTS || 0);
+  return process.env[key];
+}
+
+/*
+ * Which label variant to print, plus the barcode calibration that belongs to it.
+ *
+ * The two variants need SEPARATE nudges: the 'plain' variant has no QC CHOP box,
+ * and the barcode centres under that box — remove it and the barcode shifts, so
+ * one shared nudge can never suit both. Tune each once and toggling is clean.
+ */
+function printOpts() {
+  const variant = String(liveEnv('LABEL_VARIANT') || 'qc').toLowerCase() === 'plain'
+    ? 'plain'
+    : 'qc';
+  const nudge = Number(
+    liveEnv(variant === 'plain' ? 'BARCODE_NUDGE_DOTS_PLAIN' : 'BARCODE_NUDGE_DOTS_QC')
+    ?? liveEnv('BARCODE_NUDGE_DOTS')
+  );
+  return { variant, barcodeNudge: Number.isFinite(nudge) ? nudge : 0 };
 }
 
 // ---- Static assets --------------------------------------------------------
@@ -85,7 +103,7 @@ app.get('/api/print/preview', async (req, res) => {
     const record = await db.getOne(no);
     if (!record) return res.status(404).json({ error: 'JTC not found' });
     const template = await getTemplate();
-    const tspl = renderTspl(template, mapRecordToFields(record), { barcodeNudge: getBarcodeNudge() });
+    const tspl = renderTspl(template, mapRecordToFields(record), printOpts());
     res.type('text/plain').send(tspl);
   } catch (err) {
     console.error('[preview]', err.message);
@@ -102,7 +120,7 @@ app.get('/api/label/model', async (req, res) => {
     const record = await db.getOne(no);
     if (!record) return res.status(404).json({ error: 'JTC not found' });
     const template = await getTemplate();
-    res.json(buildModel(template, record));
+    res.json(buildModel(template, record, printOpts()));
   } catch (err) {
     console.error('[label/model]', err.message);
     res.status(500).json({ error: err.message });
@@ -118,7 +136,7 @@ app.post('/api/print', async (req, res) => {
     const record = await db.getOne(no);
     if (!record) return res.status(404).json({ error: 'JTC not found' });
     const template = await getTemplate();
-    const tspl = renderTspl(template, mapRecordToFields(record), { barcodeNudge: getBarcodeNudge() });
+    const tspl = renderTspl(template, mapRecordToFields(record), printOpts());
     const result = await agent.printLabel(tspl);
     res.json({ success: true, jobId: result.jobId });
   } catch (err) {
