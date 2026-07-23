@@ -1,0 +1,43 @@
+// Copy to locations.json and edit. This is the ONE list of print destinations
+// ("tabs") shared by every terminal — each station just picks its own tab and
+// the choice is remembered in that browser.
+//
+// Only `id` and `name` are required. Everything else falls back to the matching
+// value in .env, so a minimal entry is just id + name + templateId:
+//
+//   id           unique key, used internally and remembered per station
+//   name         what shows on the tab
+//   templateId   MES label template number to print         (default LABEL_TEMPLATE_ID)
+//   variant      "qc" (with QC CHOP box) | "plain" (without) (default LABEL_VARIANT)
+//   barcodeNudge horizontal barcode calibration, dots        (default per-variant .env nudge)
+//   printerType  "tsc" | "hprt"                              (default PRINTER_TYPE)
+//   agentUrl     the print-agent to send to                  (default AGENT_URL, i.e. the
+//                local printer). Set an address like http://10.0.1.21:9000 only for a
+//                tab that must drive a printer on ANOTHER machine.
+//
+// NOTE: this file is plain JSON — the .example has comments for guidance, but
+// locations.json itself must NOT contain comments.
+[
+  {
+    "id": "fg-sticker-qc",
+    "name": "FG Sticker (QC)",
+    "templateId": "12",
+    "variant": "qc",
+    "barcodeNudge": 64
+  },
+  {
+    "id": "fg-sticker-plain",
+    "name": "FG Sticker (Plain)",
+    "templateId": "11",
+    "variant": "plain",
+    "barcodeNudge": 24
+  },
+  {
+    "id": "packing-line",
+    "name": "Packing Line",
+    "templateId": "14",
+    "variant": "plain",
+    "barcodeNudge": 24,
+    "agentUrl": "http://10.0.1.34:9000"
+  }
+]

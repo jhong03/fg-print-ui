@@ -1,0 +1,16 @@
+[
+  {
+    "id": "fg-sticker-qc",
+    "name": "P1 FG Sticker (QC)",
+    "templateId": "12",
+    "variant": "qc",
+    "barcodeNudge": 16
+  },
+  {
+    "id": "fg-sticker-plain",
+    "name": "P1 FG Sticker (Plain)",
+    "templateId": "11",
+    "variant": "plain",
+    "barcodeNudge": 72
+  }
+]

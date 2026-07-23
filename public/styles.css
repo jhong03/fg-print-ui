@@ -36,6 +36,40 @@ html, body {
   padding: 48px 24px 80px;
 }
 
+/* ---- Destination tabs ---- */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--line);
+}
+.tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 15px;
+  padding: 10px 16px;
+  margin-bottom: -1px;              /* sit the active tab over the border */
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink); background: var(--accent-soft); }
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tab--active {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--surface);
+  border-color: var(--line);
+  border-bottom: 1px solid var(--surface);
+}
+
 /* ---- Search ---- */
 .search { margin-bottom: 32px; }
 

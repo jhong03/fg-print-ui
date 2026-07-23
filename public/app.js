@@ -15,6 +15,7 @@ const tsplPanel = document.getElementById('tsplPanel');
 const tsplView = document.getElementById('tsplView');
 const tsplCopy = document.getElementById('tsplCopy');
 const reloadTplBtn = document.getElementById('reloadTplBtn');
+const tabs = document.getElementById('tabs');
 
 let activeIndex = -1;   // highlighted suggestion for keyboard nav
 let currentList = [];   // current suggestion data
@@ -22,6 +23,73 @@ let debounceTimer = null;
 
 // ---- Setup ----------------------------------------------------------------
 input.focus();
+initLocations();
+
+// ---- Destination tabs -----------------------------------------------------
+/*
+ * Each tab is a print destination (printer + label template + calibration) from
+ * /api/locations. The same list ships to every terminal; the operator picks the
+ * one for their station and it's remembered here so it survives a reload.
+ */
+const LOC_KEY = 'jtc.locationId';
+let currentLocation = null;   // { id, name, templateId, variant } or null
+
+// The location query string appended to GETs (empty until tabs load; the server
+// then falls back to the first tab, so a print is never mis-routed silently).
+function locQuery() {
+  return currentLocation ? '&location=' + encodeURIComponent(currentLocation.id) : '';
+}
+
+async function initLocations() {
+  let list;
+  try {
+    const res = await fetch('/api/locations');
+    if (!res.ok) throw new Error('locations ' + res.status);
+    list = await res.json();
+  } catch (_) {
+    return; // no tabs — the server still prints to its default destination
+  }
+  if (!Array.isArray(list) || list.length <= 1) return; // nothing to switch
+
+  const savedId = localStorage.getItem(LOC_KEY);
+  currentLocation = list.find((l) => l.id === savedId) || list[0];
+
+  tabs.innerHTML = '';
+  list.forEach((loc) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab';
+    btn.setAttribute('role', 'tab');
+    btn.dataset.id = loc.id;
+    btn.textContent = loc.name;
+    btn.addEventListener('click', () => selectLocation(loc));
+    tabs.appendChild(btn);
+  });
+  tabs.hidden = false;
+  markActiveTab();
+}
+
+function markActiveTab() {
+  const id = currentLocation ? currentLocation.id : null;
+  tabs.querySelectorAll('.tab').forEach((b) => {
+    const on = b.dataset.id === id;
+    b.classList.toggle('tab--active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+function selectLocation(loc) {
+  if (currentLocation && loc.id === currentLocation.id) return;
+  currentLocation = loc;
+  localStorage.setItem(LOC_KEY, loc.id);
+  markActiveTab();
+  // The template + variant just changed, so anything on screen is now stale.
+  if (currentJtc) {
+    renderLabelPreview(currentJtc, labelMount, currentLocation);
+    if (!tsplPanel.hidden) refreshTspl();
+  }
+  input.focus();
+}
 
 // ---- Scan detection -------------------------------------------------------
 /*
@@ -207,8 +275,8 @@ function renderLabel(r) {
   label.hidden = false;
   actions.hidden = false;
   // Draw the preview from the live template model so it matches the printed
-  // label's geometry (positions + dimensions).
-  renderLabelPreview(currentJtc, labelMount);
+  // label's geometry (positions + dimensions) for the selected destination.
+  renderLabelPreview(currentJtc, labelMount, currentLocation);
 }
 
 function showEmpty() {
@@ -247,11 +315,12 @@ printBtn.addEventListener('click', async () => {
     const res = await fetch('/api/print', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jtcNo: currentJtc }),
+      body: JSON.stringify({ jtcNo: currentJtc, location: currentLocation?.id }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.success) throw new Error(body.error || 'Print failed');
-    setStatus('Label sent to printer (job ' + body.jobId + ').');
+    const where = currentLocation ? ' · ' + currentLocation.name : '';
+    setStatus('Label sent to printer (job ' + body.jobId + ')' + where + '.');
   } catch (e) {
     setStatus(e.message, true);
   } finally {
@@ -260,16 +329,21 @@ printBtn.addEventListener('click', async () => {
   }
 });
 
+// Fetch the rendered TSPL for the current JTC + destination into the panel.
+async function refreshTspl() {
+  const res = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc) + locQuery());
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || 'Preview failed');
+  tsplView.textContent = text;
+}
+
 // Toggle the TSPL preview panel; fetch the rendered code on open.
 previewBtn.addEventListener('click', async () => {
   if (!currentJtc) return;
   if (!tsplPanel.hidden) { hideTspl(); return; }
   previewBtn.disabled = true;
   try {
-    const res = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc));
-    const text = await res.text();
-    if (!res.ok) throw new Error(text || 'Preview failed');
-    tsplView.textContent = text;
+    await refreshTspl();
     tsplPanel.hidden = false;
     previewBtn.textContent = 'Hide TSPL';
   } catch (e) {
@@ -301,15 +375,19 @@ reloadTplBtn.addEventListener('click', async () => {
   const original = reloadTplBtn.textContent;
   reloadTplBtn.textContent = 'Reloading…';
   try {
-    const res = await fetch('/api/template/reload', { method: 'POST' });
+    const res = await fetch('/api/template/reload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: currentLocation?.id }),
+    });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.success) throw new Error(body.error || 'Reload failed');
     const when = body.updatedAt ? ' · updated ' + formatDate(body.updatedAt) : '';
     setStatus('Template reloaded' + (body.name ? ': ' + body.name : '') + when + '.');
-    // If the TSPL preview is open for a record, refresh it to show the new design.
-    if (!tsplPanel.hidden && currentJtc) {
-      const p = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc));
-      if (p.ok) tsplView.textContent = await p.text();
+    // Reflect the new design: redraw the label, and the TSPL panel if it's open.
+    if (currentJtc) {
+      renderLabelPreview(currentJtc, labelMount, currentLocation);
+      if (!tsplPanel.hidden) await refreshTspl();
     }
   } catch (e) {
     setStatus(e.message, true);

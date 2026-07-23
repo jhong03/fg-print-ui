@@ -19,11 +19,12 @@
     return e;
   }
 
-  async function renderLabelPreview(jtcNo, mount) {
+  async function renderLabelPreview(jtcNo, mount, location) {
     mount.textContent = '';
     let model;
     try {
-      const res = await fetch('/api/label/model?no=' + encodeURIComponent(jtcNo));
+      const loc = location ? '&location=' + encodeURIComponent(location.id) : '';
+      const res = await fetch('/api/label/model?no=' + encodeURIComponent(jtcNo) + loc);
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
         throw new Error(b.error || 'model ' + res.status);
