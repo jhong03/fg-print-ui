@@ -23,30 +23,51 @@
  */
 
 module.exports = {
+  // SQL Server (Avelon-Yollink MES). Field -> source column:
+  //   jtcNo     = Job.OrderNumber       customer  = Customer.Name
+  //   partName  = Product.Name          partNo    = Product.PartNumber
+  //   model     = SubProductGroup.Name  date      = Job.ActualEndDate
+  //   qty       = Job.Quantity          woNo      = MO.Field1
+  //   barcodeId = Job.Id                (encoded in the printed barcode)
+  // Tables are referenced as dbo.* — the pool connects to MSSQL_DATABASE.
   mssql: {
-    // Suggestions list. TOP 10 keeps the dropdown snappy.
+    // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
+    // so both surface results. GROUP BY OrderNumber dedupes when several jobs
+    // share a JTC No; TOP 10 keeps the dropdown snappy. Newest job first.
     search: `
       SELECT TOP 10
-        jtc_no    AS jtcNo,
-        part_name AS partName
-      FROM YOUR_TABLE
-      WHERE jtc_no LIKE @jtc
-      ORDER BY jtc_no
+        j.OrderNumber AS jtcNo,
+        MAX(p.Name)   AS partName
+      FROM dbo.Job j
+      LEFT JOIN dbo.Product p ON p.Id = j.ProductId
+      WHERE j.OrderNumber LIKE @jtc
+         OR CAST(j.Id AS varchar(20)) LIKE @jtc
+      GROUP BY j.OrderNumber
+      ORDER BY MAX(j.Id) DESC
     `,
-    // Full record for one JTC number.
+    // Full record for one job. @jtc may be the JTC No (OrderNumber) OR the
+    // barcode id (Job.Id) — so scanning the printed label resolves the job too.
+    // TRY_CONVERT keeps the Id match safe when @jtc isn't numeric. TOP 1 +
+    // ORDER BY Id DESC picks the latest job if a JTC No is reused.
     getOne: `
-      SELECT
-        jtc_no     AS jtcNo,
-        customer   AS customer,
-        part_name  AS partName,
-        part_no    AS partNo,
-        model      AS model,
-        job_date   AS date,
-        qty        AS qty,
-        uom        AS uom,
-        wo_no      AS woNo
-      FROM YOUR_TABLE
-      WHERE jtc_no = @jtc
+      SELECT TOP 1
+        j.OrderNumber     AS jtcNo,
+        c.Name            AS customer,
+        p.Name            AS partName,
+        p.PartNumber      AS partNo,
+        spg.Name          AS model,
+        j.CreateDate      AS date,
+        j.Quantity        AS qty,
+        mo.Field1         AS woNo,
+        j.Id              AS barcodeId
+      FROM dbo.Job j
+      LEFT JOIN dbo.Customer         c   ON c.Id   = j.CustomerId
+      LEFT JOIN dbo.Product          p   ON p.Id   = j.ProductId
+      LEFT JOIN dbo.SubProductGroup  spg ON spg.Id = p.SubProductGroupId
+      LEFT JOIN dbo.MO               mo  ON mo.Id  = j.MOId
+      WHERE LTRIM(RTRIM(j.OrderNumber)) = LTRIM(RTRIM(@jtc))
+         OR j.Id = TRY_CONVERT(int, @jtc)
+      ORDER BY j.Id DESC
     `,
   },
 

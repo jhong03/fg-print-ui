@@ -63,8 +63,8 @@ function resolveEntry(entry, d) {
   const variant = String(entry.variant || d.variant).toLowerCase() === 'plain'
     ? 'plain'
     : 'qc';
+  // A tab's own nudge wins; otherwise the single .env default; otherwise 0.
   const nudge = num(entry.barcodeNudge)
-    ?? num(process.env[variant === 'plain' ? 'BARCODE_NUDGE_DOTS_PLAIN' : 'BARCODE_NUDGE_DOTS_QC'])
     ?? num(process.env.BARCODE_NUDGE_DOTS)
     ?? 0;
   return {

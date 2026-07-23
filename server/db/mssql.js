@@ -1,10 +1,11 @@
 /*
- * SQL Server adapter (placeholder).
+ * SQL Server adapter for the Avelon-Yollink MES. The SQL lives in
+ * server/db/queries.js (the mssql section); this file is schema-agnostic — it
+ * just runs those queries with the @jtc parameter bound.
  *
- * TO ENABLE:
+ * TO USE:
  *   1. npm i mssql
  *   2. set DB_CLIENT=mssql and the MSSQL_* values in .env
- *   3. put your real SQL in server/db/queries.js  (the mssql section)
  *
  * The connection pool is created lazily on first use and reused after that.
  */
@@ -27,7 +28,6 @@ function getPool() {
 
   const config = {
     server: process.env.MSSQL_SERVER || 'localhost',
-    port: Number(process.env.MSSQL_PORT || 1433),
     database: process.env.MSSQL_DATABASE,
     user: process.env.MSSQL_USER,
     password: process.env.MSSQL_PASSWORD,
@@ -37,6 +37,16 @@ function getPool() {
         String(process.env.MSSQL_TRUST_SERVER_CERT).toLowerCase() === 'true',
     },
   };
+
+  // A named instance ("HOST\SQLEXPRESS") is reached by instance name, resolved
+  // via the SQL Browser service (UDP 1434) — NOT by a fixed port. Put only the
+  // host in MSSQL_SERVER and the instance in MSSQL_INSTANCE. A default instance
+  // uses the port instead.
+  if (process.env.MSSQL_INSTANCE) {
+    config.options.instanceName = process.env.MSSQL_INSTANCE;
+  } else {
+    config.port = Number(process.env.MSSQL_PORT || 1433);
+  }
 
   poolPromise = new mssql.ConnectionPool(config)
     .connect()
