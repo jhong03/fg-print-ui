@@ -31,7 +31,9 @@ function mapRecordToFields(r) {
 
   return {
     coNumber: jtcNo,
-    woNumber: r.woNo || '',
+    // "W/O No" is the JTC No on these labels. Postgres still supplies a real
+    // woNo (jtc_WO); SQL Server has none, so it falls back to the JTC No.
+    woNumber: r.woNo,
     partName: r.partName || '',
     dateIssue: formatDate(r.date),
     qty: r.qty != null ? String(r.qty) : '',
@@ -43,8 +45,13 @@ function mapRecordToFields(r) {
     partNo: r.partNo || '',
     model: r.model || '',
 
+    // Work Order label fields (SQL Server; empty on data sources that omit them).
+    stockCode: r.stockCode || '',
+    processCode: r.processCode || '',
+    empNo: r.empNo || '',
+
     // Not sourced yet — emitted empty.
-    stockCode: '', processCode: '', empNo: '', binId: '', lotNumber: '',
+    binId: '', lotNumber: '',
     remarksLine1: '', remarksLine2: '', remarksLine3: '', remarksLine4: '',
     weightLine1: '', weightLine2: '', weightLine3: '', weightLine4: '',
   };

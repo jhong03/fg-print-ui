@@ -36,23 +36,42 @@ function estimateBarcodeWidth(content, narrow) {
   return modules * (narrow || 2);
 }
 
-// y-center of the QC CHOP box (the largest box element), which the barcode is
-// centered under. Falls back to CENTER_Y if there is no box.
-function boxCenterY(elements) {
-  const boxes = (elements || []).filter((e) => e.type === 'box');
-  if (!boxes.length) return CENTER_Y;
-  const box = boxes.reduce((a, b) =>
-    (a.width || 0) * (a.height || 0) >= (b.width || 0) * (b.height || 0) ? a : b
+// The barcode only auto-centers on a QC CHOP box. This is that marker — a static
+// "QC CHOP" caption. (Mirrors render.js; kept local to avoid a circular require.)
+const QC_CAPTION = /^\s*QC\s*CHOP\s*$/i;
+
+function hasQcCaption(elements) {
+  return (elements || []).some((e) =>
+    e.type === 'text' && e.value && e.value.kind === 'static' && QC_CAPTION.test(e.value.text || '')
   );
-  return box.y + (box.height || 0) / 2;
 }
 
-// Returns the (shifted) anchor plus the estimated width so the preview can size
-// the image to match. `elements` is the full element list (to locate the box).
+// The QC CHOP box — the largest box element.
+function qcBox(elements) {
+  const boxes = (elements || []).filter((e) => e.type === 'box');
+  if (!boxes.length) return null;
+  return boxes.reduce((a, b) =>
+    (a.width || 0) * (a.height || 0) >= (b.width || 0) * (b.height || 0) ? a : b
+  );
+}
+
+// Returns the barcode anchor plus estimated width (so the preview can size the
+// image to match). Placement depends on the template:
+//   - QC label (has a QC CHOP box): center the barcode along that box.
+//   - Other boxes but NO QC box (e.g. a Work Order label's border/grid): keep
+//     the designer's position — centering on the border would drop it on the
+//     title.
+//   - No boxes at all: CENTER_Y fallback (preserves existing calibrations).
 function centeredBarcode(el, content, elements) {
   const width = estimateBarcodeWidth(content, el.narrow || 2);
-  const y = Math.round(boxCenterY(elements) + width / 2);
-  return { x: el.x, y, width };
+  if (hasQcCaption(elements)) {
+    const box = qcBox(elements);
+    const center = box ? box.y + (box.height || 0) / 2 : CENTER_Y;
+    return { x: el.x, y: Math.round(center + width / 2), width };
+  }
+  const anyBox = (elements || []).some((e) => e.type === 'box');
+  if (anyBox) return { x: el.x, y: el.y, width }; // honour designed position
+  return { x: el.x, y: Math.round(CENTER_Y + width / 2), width };
 }
 
 module.exports = { hasBarcodeData, estimateBarcodeWidth, centeredBarcode, CENTER_Y };

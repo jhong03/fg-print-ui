@@ -15,7 +15,13 @@
 // Approx TSC internal font cell size (dots @203dpi): [width, height].
 const FONT_W = { 1: 8, 2: 12, 3: 16, 4: 24, 5: 32 };
 const FONT_H = { 1: 12, 2: 20, 3: 24, 4: 32, 5: 48 };
-const MARGIN = 24;     // dots of breathing room before an obstacle (~3 mm)
+// Breathing room before an obstacle. A barcode needs real clearance — its bars
+// must stay scannable and its human-readable digits overhang. A rule line only
+// needs to not be touched, so demanding 3 mm there just wastes a character and
+// forces ugly mid-word breaks.
+const MARGIN_BARCODE = 24; // ~3 mm
+const MARGIN_RULE = 8;     // ~1 mm
+const MARGIN_EDGE = 24;    // ~3 mm — printers can't print right to the edge
 const LINE_FACTOR = 1.15;
 
 function fontH(el) {
@@ -50,16 +56,21 @@ function obstacleYHigh(el) {
 
 function availableWidth(el, elements) {
   const [ex0, ex1] = xBand(el);
-  let boundary = 0; // label edge at y=0
+  let boundary = 0;               // label edge at y=0
+  let margin = MARGIN_EDGE;       // nothing in the way -> keep off the edge
   for (const o of elements) {
     if (o === el) continue;
     if (o.type !== 'bar' && o.type !== 'box' && o.type !== 'barcode') continue;
     const [ox0, ox1] = xBand(o);
     if (ox1 <= ex0 || ox0 >= ex1) continue; // no x overlap → not in the way
     const yHigh = obstacleYHigh(o);
-    if (yHigh <= el.y && yHigh > boundary) boundary = yHigh;
+    if (yHigh <= el.y && yHigh > boundary) {
+      boundary = yHigh;
+      // The margin belongs to whatever actually stops the line.
+      margin = o.type === 'barcode' ? MARGIN_BARCODE : MARGIN_RULE;
+    }
   }
-  return el.y - boundary - MARGIN;
+  return el.y - boundary - margin;
 }
 
 /*

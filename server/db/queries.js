@@ -24,12 +24,14 @@
 
 module.exports = {
   // SQL Server (Avelon-Yollink MES). Field -> source column:
-  //   jtcNo     = Job.OrderNumber       customer  = Customer.Name
-  //   partName  = Product.Name          partNo    = Product.PartNumber
-  //   model     = SubProductGroup.Name  date      = Job.ActualEndDate
-  //   qty       = Job.Quantity          woNo      = MO.Field1
-  //   barcodeId = Job.Id                (encoded in the printed barcode)
-  // Tables are referenced as dbo.* — the pool connects to MSSQL_DATABASE.
+  //   jtcNo     = Job.OrderNumber       customer    = Customer.Name
+  //   partName  = Product.Name          partNo      = Product.PartNumber
+  //   model     = SubProductGroup.Name  date        = Job.CreateDate
+  //   qty       = Job.Quantity          barcodeId   = Job.Id
+  //   empNo     = User.EmployeeNum (via Job.CreatedBy)
+  //   stockCode / processCode = Flow (see the ⚠ ASSUMPTIONS on getOne below)
+  // The "W/O No" label field is the JTC No itself (see mapRecord woNumber),
+  // so there's no MO join. Tables are dbo.* — the pool connects to MSSQL_DATABASE.
   mssql: {
     // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
     // so both surface results. GROUP BY OrderNumber dedupes when several jobs
@@ -49,6 +51,17 @@ module.exports = {
     // barcode id (Job.Id) — so scanning the printed label resolves the job too.
     // TRY_CONVERT keeps the Id match safe when @jtc isn't numeric. TOP 1 +
     // ORDER BY Id DESC picks the latest job if a JTC No is reused.
+    // Stock Code and Process Code come from the job's routing (Flow rows).
+    //
+    // ⚠ ASSUMPTIONS — verify against a known-good Work Order label, then adjust:
+    //   stockCode   = the FG OUTPUT node's StockCode (FlowType = 2). If the label
+    //                 should show the RAW MATERIAL stock code instead, change the
+    //                 "f.FlowType = 2" in the stockCode subquery to "= 0".
+    //   processCode = every process step (FlowType = 1) joined in flow order,
+    //                 e.g. "CT, BD". If it should be one specific step, narrow
+    //                 the processCode subquery's WHERE.
+    // The routing is the job's ProductFlowRevId, or the product's default
+    // revision when the job has none (fr OUTER APPLY).
     getOne: `
       SELECT TOP 1
         j.OrderNumber     AS jtcNo,
@@ -59,12 +72,32 @@ module.exports = {
         j.CreateDate      AS date,
         j.Quantity        AS qty,
         mo.Field1         AS woNo,
-        j.Id              AS barcodeId
+        j.Id              AS barcodeId,
+        u.EmployeeNum     AS empNo,
+        (SELECT TOP 1 f.StockCode
+           FROM dbo.Flow f
+           WHERE f.FlowRevId = fr.FlowRevId AND f.FlowType = 2
+           ORDER BY f.Id) AS stockCode,
+        STUFF((SELECT ', ' + f.ProcessCodeName
+                 FROM dbo.Flow f
+                 WHERE f.FlowRevId = fr.FlowRevId AND f.FlowType = 1
+                   AND NULLIF(LTRIM(RTRIM(f.ProcessCodeName)), '') IS NOT NULL
+                 ORDER BY f.X, f.Id
+                 FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') AS processCode
       FROM dbo.Job j
       LEFT JOIN dbo.Customer         c   ON c.Id   = j.CustomerId
       LEFT JOIN dbo.Product          p   ON p.Id   = j.ProductId
       LEFT JOIN dbo.SubProductGroup  spg ON spg.Id = p.SubProductGroupId
       LEFT JOIN dbo.MO               mo  ON mo.Id  = j.MOId
+      LEFT JOIN dbo.[User]           u   ON u.Id   = j.CreatedBy
+      OUTER APPLY (
+        SELECT COALESCE(
+          j.ProductFlowRevId,
+          (SELECT TOP 1 x.Id FROM dbo.FlowRevision x
+             WHERE x.ProductId = j.ProductId
+             ORDER BY x.IsDefault DESC, x.Revision DESC)
+        ) AS FlowRevId
+      ) fr
       WHERE LTRIM(RTRIM(j.OrderNumber)) = LTRIM(RTRIM(@jtc))
          OR j.Id = TRY_CONVERT(int, @jtc)
       ORDER BY j.Id DESC

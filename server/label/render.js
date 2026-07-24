@@ -64,6 +64,10 @@ function boxArea(b) {
 
 function applyVariant(elements, variant) {
   if (variant !== 'plain') return elements;
+  // Only act when the template actually has a QC CHOP caption. Without this
+  // guard, 'plain' would strip the largest box of ANY template — e.g. a Work
+  // Order label's outer border, which isn't a QC box at all.
+  if (!elements.some(isQcCaption)) return elements;
   // The QC CHOP box is the largest box — the same rule barcodeLayout uses to
   // pick what the barcode centres under, so the two always agree.
   const boxes = elements.filter((e) => e.type === 'box');

@@ -12,5 +12,12 @@
     "templateId": "11",
     "variant": "plain",
     "barcodeNudge": 72
+  },
+  {
+    "id": "work-order-p3",
+    "name": "Work Order (P3)",
+    "templateId": "13",
+    "variant": "plain",
+    "barcodeNudge": 0
   }
 ]
