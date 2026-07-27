@@ -7,319 +7,402 @@ Written so another AI/dev with no prior context can understand and extend it.
 
 ## 1. What it is
 
-A minimal **local web app for production operators** at YOLLINK INDUSTRIES.
-An operator picks a **JTC number** (a job) by typing or scanning it; the app pulls
-that job's data from a database, shows a to-scale label preview, and prints a
-**P1 FG sticker** on a **TSC TE244** thermal label printer.
+A **local web app for production operators** at YOLLINK INDUSTRIES. An operator
+picks a **JTC number** (a job) by typing or **scanning** it; the app pulls that
+job's data from a database, shows a to-scale label preview, and prints a label on
+a **TSC TE244** thermal printer (TSPL2, 203 dpi).
 
-The app does **not** own the label design or the printer. It plugs into an
+It runs **one instance per operator terminal**, next to that terminal's printer.
+The app does **not** own the label design or the printer — it plugs into an
 existing factory system:
 - it **reads the label layout** from an existing **MES** (a separate web system),
-- it **reads the job data** from a shared **PostgreSQL** database,
+- it **reads the job data** from a shared **SQL Server** database (the MES's own
+  "Avelon" DB),
 - it **prints** through an existing **print-agent** that sits next to the printer.
 
-The app's job is to be the simple operator front-end that combines those three.
+Beyond the basic lookup→print, it now has: **destination tabs** (one config, many
+printer/template combos), a **resilient print queue** (hands-free scanning, pause/
+resume, survives power cuts), and per-tab **label variants + print calibration**.
 
 ---
 
 ## 2. Tech stack
 
-- **Runtime:** Node.js (v24), CommonJS modules (`require`, not `import`).
-- **Server:** Express 4.
-- **Frontend:** plain HTML/CSS/JS (no framework, no build step). Served static.
-- **DB driver:** `pg` (PostgreSQL). `mssql` also scaffolded but unused.
-- **Barcode (preview only):** `jsbarcode`, served locally for offline use.
-- **Platform:** Windows. Shell examples assume Git Bash or PowerShell.
+- **Runtime:** Node.js (v24), CommonJS (`require`, not `import`).
+- **Server:** Express 4. **Frontend:** plain HTML/CSS/JS, no build step, served static.
+- **DB drivers:** `mssql` (tedious) — **active**; `pg` (PostgreSQL) — alternative; `mock`.
+- **Barcode (preview only):** `jsbarcode`, served locally (offline).
+- **Platform:** Windows (the print-agent + spooler control use PowerShell).
 
 ---
 
-## 3. The three external systems it talks to
+## 3. The three external systems
 
-| System | What it is | Where | What we use it for |
+| System | What it is | Where | Used for |
 |---|---|---|---|
-| **PostgreSQL** | Shared production DB (also used by an existing Laravel "eJTC" app) | `43.217.35.209:5432`, db `bky-ejtc` (creds in `.env`) | The **values** on the label (customer, part name, qty, etc.) |
-| **MES** ("Warehouse Console P3") | A separate React web app that has a visual **label designer** + template store | `http://ec2-43-217-35-209.ap-southeast-5.compute.amazonaws.com:8081` | The **label layout** (template JSON) — positions + which field each slot wants |
-| **print-agent** | A separate Node app running on each operator terminal, next to the printer | local `http://localhost:9000` (code lives at `C:\print-agent`) | We POST it **TSPL** (printer code); it drives the TSC TE244 |
+| **SQL Server** ("Avelon-Yollink" MES DB) | The MES's production DB, reached directly | `10.0.100.14\SQLEXPRESS` (see `.env` MSSQL_*) | The **values** on the label (customer, part, qty, dates, customer-order, routing) |
+| **MES** ("Warehouse Console P3") | Separate React app with a visual **label designer** + template store | `http://ec2-43-217-35-209…:8081` | The **label layout** (template JSON) — positions + which field key each slot wants |
+| **print-agent** | Separate Node app on each terminal, next to the printer | local `http://localhost:9000` (code at `C:\print-agent`) | We POST it **TSPL**; it drives the TSC TE244 |
 
-> ⚠️ There is also a **local** PostgreSQL 18 on `localhost:5432` on the dev
-> machine — that is a DIFFERENT database and will fail auth. The real DB is the
-> **remote** host above.
+> A legacy **PostgreSQL** ("bky-ejtc") is still supported as an alternative DB
+> adapter but is not the active source. `DB_CLIENT` selects the adapter.
 
 ### About the MES template
-- Templates are JSON layouts, fetched via `GET /api/label-templates/{id}`.
-- We use template **id 11** ("P1 FG Sticker"), set by `LABEL_TEMPLATE_ID`.
+- Templates are JSON, fetched via `GET /api/label-templates/{id}`.
 - A template = `{ label:{widthMm,heightMm,dpi,gapMm,direction,printMethod},
-  elements:[ ... ] }`.
-- Each element is `text` | `bar` | `box` | `barcode`, with `x,y` in **printer
-  dots** and a `value` of either `{kind:"static", text}` (fixed wording like
-  "QC CHOP", "Customer", ":") or `{kind:"field", field:"partName", prefix?}`
-  (a placeholder that our code fills from the DB).
-- The MES also exposes the list of valid field keys at
-  `GET /api/label-templates/fields`.
+  elements:[ … ] }`. Each element is `text | bar | box | barcode`, `x,y` in
+  **printer dots**, with a `value` of `{kind:"static", text}` or
+  `{kind:"field", field:"…", prefix?}`.
+- The **field catalog** (valid keys) is at `GET /api/label-templates/fields`. It
+  is **fixed** — you cannot invent a key like `jtcNumber`; only keys in the
+  catalog can be bound in the designer (see §7.1 gotcha).
+- Templates in use: **11** = "P1 FG Sticker (No QC Box)", **12** = "P1 FG Sticker
+  (QC Box)", **13** = "P3 / Work Order", **1/2** = Work Order Assign/Scan.
 
-### About the print-agent
-- Local HTTP API on `:9000`. Key endpoint: `POST /print-label` with
-  `{ printerType:"tsc", labelData:"<TSPL string>" }` → `{ success, jobId }`.
-- It sends TSPL to the printer via raw TCP `:9100` (if a printer IP is set) or a
-  Windows share (`TSC_TE244`).
-- It also connects out to a **relay** (`ws://…:3001`) so the MES can reach it;
-  our app does NOT use the relay — it talks to the agent **locally**.
-- The agent must be running on the terminal for physical printing to work.
+### About the print-agent (`C:\print-agent`, separate repo)
+- Local HTTP on `:9000`. `POST /print-label {printerType, labelData}` →
+  `{success, jobId}` — this only means the job was **accepted into the agent's
+  queue**, NOT that it printed. `GET /print/status/:jobId` → `SUCCESS|FAILED|…`.
+  `GET /printer/status` → `{connected, online, status, hasError, queueDepth, name}`.
+- Prints via **raw TCP :9100** if `tscIp` is set, else a **Windows share**
+  (`tscShareName`, e.g. `TSC_TE244`). Current setup uses the **USB share**
+  (`tscIp` was removed — it was an unreachable example default).
+- Also connects out to a **relay** (`ws://…:3001`) for the MES's own Test-Print;
+  our app does **not** use the relay — it talks to the agent locally by URL.
+- **Only one agent may run per `agentId`** — a second instance makes the relay
+  evict them in a loop ("Relay connected / disconnected" flapping) and breaks
+  printing. Kill duplicates.
 
 ---
 
 ## 4. Directory map
 
 ```
-P1FGUI/
-├── .env                     Active config (gitignored; real credentials)
-├── .env.example             Template for .env
-├── package.json             deps: express, dotenv, jsbarcode (+ optional pg, mssql)
+fg-print-ui/
+├── .env / .env.example       Config (.env gitignored)
+├── locations.json            *** The destination "tabs" *** (+ .json.example)
+├── package.json              express, dotenv, jsbarcode (+ mssql, pg)
 ├── server/
-│   ├── index.js             Express app: all HTTP routes, server startup
-│   ├── mes.js               Fetches + caches the MES template (getTemplate, reload)
-│   ├── agent.js             Client for the local print-agent (:9000)
+│   ├── index.js              Express app: all HTTP routes, startup
+│   ├── mes.js                Fetch + per-template-id cache of MES templates
+│   ├── agent.js              Client for a print-agent (per-call agentUrl/type)
+│   ├── locations.js          Loads locations.json (tabs); list()/get(id)
+│   ├── printQueue.js         *** Persistent print queue *** (worker, pause/resume)
+│   ├── spooler.js            Clears the local Windows spooler (Remove-PrintJob)
 │   ├── db/
-│   │   ├── index.js         Adapter factory — picks by DB_CLIENT env
-│   │   ├── queries.js       *** THE SQL *** (postgres + mssql query strings)
-│   │   ├── postgres.js      pg adapter (search, getOne, close)
-│   │   ├── mssql.js         SQL Server adapter (scaffolded, unused)
-│   │   └── mock.js          In-memory sample data (DB_CLIENT=mock)
+│   │   ├── index.js          Adapter factory (picks by DB_CLIENT)
+│   │   ├── queries.js        *** THE SQL *** (mssql + postgres query strings)
+│   │   ├── mssql.js          SQL Server adapter (tedious; named-instance aware)
+│   │   ├── postgres.js       pg adapter
+│   │   └── mock.js           In-memory sample data
 │   └── label/
-│       ├── render.js        Template + values -> TSPL string (renderTspl)
-│       ├── model.js         Template + values -> geometry for on-screen preview
-│       ├── mapRecord.js     DB record -> MES field-key/value map
-│       ├── textLayout.js    Wraps long text values onto extra lines
-│       └── barcodeLayout.js Skip-if-empty + center barcode under QC box
+│       ├── render.js         template+values → TSPL (renderTspl); upright + variant
+│       ├── model.js          template+values → SVG-preview geometry (buildModel)
+│       ├── mapRecord.js      DB record → MES field-key/value map
+│       ├── textLayout.js     Per-line word-wrap around obstacles
+│       └── barcodeLayout.js  Skip-if-empty + center-under-QC-box + width estimate
 ├── public/
-│   ├── index.html           The single screen
-│   ├── styles.css           Minimal styling + print CSS
-│   ├── app.js               Search/scan/select/print/preview UI logic
-│   └── labelPreview.js      Draws the to-scale SVG label from the model
-├── README.md
-├── FLOW.md                  Plain-language operator + full flow + reload branch
-└── PROJECT_CONTEXT.md       (this file)
+│   ├── index.html            Tabs + search + preview + actions + queue panel
+│   ├── styles.css
+│   ├── app.js                Scan/select/enqueue + tabs + queue polling UI
+│   └── labelPreview.js       Draws the to-scale SVG from the model
+├── scripts/check-mssql.js    Standalone SQL Server connectivity tester
+├── README.md / FLOW.md / PROJECT_CONTEXT.md
 ```
 
 ---
 
-## 5. The core idea (read this to understand everything)
-
-**Three inputs combine into one printed label:**
+## 5. Core idea
 
 ```
-MES template (layout + field keys)  +  DB record (the values)  →  our code  →  TSPL  →  printer
+MES template (layout + field keys)  +  DB record (values)  →  our code  →  TSPL  →  agent → printer
 ```
 
-- **MES** decides *which rows exist, where they sit, and which key each wants.*
-  It carries **no data**.
-- **DB** provides the **actual values**.
-- **Our code** (`render.js`) is a re-implementation of the MES's own TSPL
-  renderer. We generate the TSPL ourselves because the MES's render endpoint only
-  injects sample data — it can't use real job data. Owning TSPL generation is
-  what lets us add wrapping, barcode centering, and print calibration.
+- **MES** decides which rows exist, where, and which key each wants. **No data.**
+- **DB** provides the values.
+- **`render.js`** re-implements the MES's own TSPL renderer (the MES render
+  endpoint only injects sample data), so we can add wrapping, barcode centering,
+  print calibration, upright reorientation, and label variants.
 
-**Field matching is an exact, case-sensitive key lookup.** A template element
+**Field matching is exact, case-sensitive.** A template element
 `{value:{kind:"field", field:"partName"}}` is filled by `values["partName"]`,
-where `values` is built by `mapRecordToFields()`. If the key doesn't match a
-property in that object, the slot prints blank. (See `render.js` `resolveValue`.)
+built by `mapRecordToFields()`. No match → blank slot.
 
 ---
 
 ## 6. Data + print flow (end to end)
 
-**Look up a job**
-1. Operator types/scans → `GET /api/jtc/search?q=…` → `db.search()` → Postgres →
-   suggestions dropdown.
-2. Operator selects one → `GET /api/jtc?no=…` → `db.getOne()` → the full record →
-   shown on screen (the SVG preview).
-
-**Preview** (to-scale, matches the print)
-- `GET /api/label/model?no=…` → `getTemplate()` (MES) + `buildModel()` →
-  JSON of the label's dimensions + positioned, value-resolved elements →
-  `public/labelPreview.js` draws it as an SVG.
-- `GET /api/print/preview?no=…` → the exact **TSPL** text (no printing).
-
-**Print**
-- `POST /api/print { jtcNo }` → `db.getOne()` + `getTemplate()` +
-  `mapRecordToFields()` + `renderTspl()` → TSPL → `agent.printLabel()` →
-  `POST http://localhost:9000/print-label` → agent → **TSC TE244**.
+1. **Look up** — operator types/scans → `GET /api/jtc/search?q=` → `db.search()`
+   → suggestions. Selecting or scanning → `GET /api/jtc?no=` → `db.getOne()` →
+   the record → SVG preview (`/api/label/model`).
+2. **Scan = hands-free print.** A scan (paste, or a <40 ms keystroke burst ≥4
+   chars) is auto-accepted **and auto-queued**. A manual (typed) lookup only
+   queues when the operator clicks **Print label**.
+3. **Queue** — `POST /api/print {jtcNo, location}` enqueues. The queue worker
+   renders + sends **one job at a time** to that tab's agent and confirms each
+   physically printed before the next (see §9).
+4. **Render** — `db.getOne()` + `getTemplate(templateId)` + `mapRecordToFields()`
+   + `renderTspl()` → TSPL → `agent.printLabel(tspl, location)` → `:9000` → TE244.
 
 ---
 
-## 7. The label rendering pipeline (detail)
+## 7. The label rendering pipeline
 
 ### 7.1 Field mapping — `server/label/mapRecord.js`
-`mapRecordToFields(record)` turns the DB row into a flat `{ fieldKey: value }`
-map keyed by **MES field-key names**:
-- `coNumber` ← `jtcNo` (the JTC No / `ordernumber`)
-- `woNumber` ← `woNo`
-- `partName` ← `partName`
-- `dateIssue` ← `date` (formatted `dd/mm/yyyy`)
-- `qty` ← `qty`
-- `jtc_barcodeId` ← `barcodeId` (empty string if the job has none)
-- `customer`, `partNo`, `model` ← from DB, **ready but not yet used** (the MES
-  template has no slots bound to these keys yet)
-- `stockCode`, `processCode`, `empNo`, `remarksLine1-4`, `weightLine1-4`,
-  `binId`, `lotNumber` ← emitted empty (no data source yet)
+Turns the DB row into `{ MES-field-key: value }`. **Current mapping:**
+- `coNumber` ← `jtcNo` — the **JTC No** (Job.OrderNumber). *(The template's "JTC
+  No" element binds `coNumber`.)*
+- `customerOrder` ← `r.coNo` — the **C/O No** (CustomerOrder.OrderNumber).
+  ⚠ **Work in progress**: the value side is wired (query returns `coNo`), but
+  `customerOrder` is a **placeholder LEFT key** — the MES field catalog has no
+  key for it yet. To finish: create/choose the real MES key, rename the LEFT key
+  here to match, and bind the "C/O No" element to it in the designer.
+- `partName`, `dateIssue` (`dd/mm/yyyy`), `qty`, `jtc_barcodeId` (blank ⇒ barcode
+  skipped) — bound and working.
+- `customer`, `partNo`, `model` — value side wired (query returns them), but the
+  MES catalog has **no keys** for them yet → print blank until the MES adds them.
+- `stockCode`, `processCode`, `empNo` — Work Order fields (SQL Server; §8).
+- `woNumber`, `binId`, `lotNumber`, `remarksLine1-4`, `weightLine1-4` — emitted
+  empty (no live source).
 
-### 7.2 TSPL rendering — `server/label/render.js`
-`renderTspl(template, values, opts)`:
-- Emits the header (`SIZE/GAP/DIRECTION/CLS/[SET PRINTMETHOD]/OFFSET`).
-- Walks `template.elements` in order; per type emits TSPL:
-  - `text` → `TEXT x,y,"font",rotation,xMul,yMul,"value"` (value from
-    `resolveValue`, may wrap into several lines — see 7.4).
-  - `bar` → `BAR x,y,w,h`
-  - `box` → `BOX x,y,x+w,y+h,thickness`
-  - `barcode` → `BARCODE …` (see 7.5) — skipped entirely if no id.
-- Ends with `PRINT 1,1\n`.
-- **Verified byte-for-byte identical to the MES's own renderer** for text/bar/box
-  (the barcode line intentionally differs).
+> **Naming gotcha:** the field-key names don't always match their meaning,
+> because the MES designer's catalog is fixed and the templates were bound before
+> our involvement. Trust the mapRecord comments, not the key names.
 
-### 7.3 Preview model — `server/label/model.js`
-`buildModel(template, record)` uses the same `resolveValue`, `layoutText`, and
-`barcodeLayout` logic, but returns **geometry** (dots) instead of TSPL, so the
-browser can draw an SVG that matches the print. Output:
-`{ label:{widthMm,heightMm,dpi,widthDots,heightDots}, elements:[…] }`.
+### 7.2 TSPL rendering — `server/label/render.js` → `renderTspl(template, values, opts)`
+- Header `SIZE/GAP/DIRECTION/CLS/[SET PRINTMETHOD DIRECT]/OFFSET`, then one line
+  per element (`TEXT/BAR/BOX/BARCODE`), then `PRINT 1,1\n`.
+- **Byte-for-byte identical to the MES renderer** for text/bar/box (barcode line
+  intentionally differs).
+- **Upright reorientation (`makeUpright`)**: MES designs some labels *sideways*
+  (portrait media, every element at rotation 270, read in landscape). When the
+  majority of text is at 270, the renderer rotates the whole layout so it prints
+  upright — `SIZE` swaps, coords map `(x,y)→(H−y,x)`, each rotation drops by 270.
+  A template already upright is emitted unchanged. Negative coords are clamped ≥0.
+- **Variants (`applyVariant`)**: `variant:'plain'` strips the **QC CHOP box + its
+  "QC CHOP" caption** — but **only if a "QC CHOP" caption exists**, so it can't
+  accidentally delete an unrelated box (e.g. a Work Order's border). `variant:'qc'`
+  keeps everything.
+- **`placedElements`**: before wrapping/positioning, barcodes are resolved to
+  where they'll actually print (centered), so text wraps around their real
+  position, not the template's.
+
+### 7.3 Preview model — `server/label/model.js` → `buildModel(template, record, opts)`
+Same resolve/wrap/barcode logic but returns **geometry (dots)** for the browser
+SVG, so the on-screen preview matches the print. Applies the same variant.
 
 ### 7.4 Text wrapping — `server/label/textLayout.js`
-Long values (esp. a JTC No with a component suffix) would overrun into the
-barcode/QC box. `layoutText()` measures how far the text can extend before
-hitting an obstacle (bar/box/barcode in the same lane) or the label edge, and
-wraps at word boundaries onto stacked lines. Used by BOTH print and preview.
+`layoutText()` wraps long values at word boundaries. Each wrapped line is measured
+**at its own position** against obstacles (bar/box/barcode, incl. a barcode's
+human-readable digits) in the same lane. Margin depends on the blocker: barcode
+~3 mm, rule line ~1 mm, label edge ~3 mm. Handles both rotation-270 and rotation-0
+text.
 
-### 7.5 Barcode standardization — `server/label/barcodeLayout.js`
-- **Skip when empty:** if `jtc_barcodeId` is blank, no barcode is drawn (avoids a
-  fallback that produced inconsistent widths).
-- **Center under the QC box:** Code128 width ∝ content length, so we estimate the
-  width and offset the anchor so the barcode's center aligns with the QC CHOP
-  box's center. Robust to the box being moved in the template.
-- **Print calibration:** `BARCODE_NUDGE_DOTS` (from `.env`, read live) shifts the
-  **printed** barcode horizontally (positive = right; 8 dots ≈ 1 mm) to correct
-  small physical off-centering. Does NOT affect the preview.
-
-### 7.6 Coordinate system (important for the preview)
-- Printer dots at **203 dpi** = **8 dots/mm**. Label 80×125 mm ≈ **640×1000 dots**,
-  portrait. Text is drawn at **rotation 270** in the template.
-- The label is READ in landscape. The preview maps native → display via
-  `(x, y) → (heightDots − y, x)`, implemented as the SVG group transform
-  `translate(heightDots,0) rotate(90)`. Text keeps its own `rotate(270)`, so
-  270 + 90 = 360 → it reads horizontally.
+### 7.5 Barcode — `server/label/barcodeLayout.js`
+- **Skip when empty** (`jtc_barcodeId` blank ⇒ no barcode).
+- **Center under the QC box** — but **only when a "QC CHOP" caption exists**;
+  otherwise the barcode keeps the designer's placement (a Work Order label's
+  barcode must not be dragged to the label center). Code128 width ∝ content, so
+  width is estimated to center it.
+- **`BARCODE_NUDGE_DOTS` / per-tab `barcodeNudge`** shifts the **printed** barcode
+  horizontally (8 dots ≈ 1 mm). Because removing the QC box moves the barcode,
+  the QC and Plain tabs each carry their **own** nudge.
 
 ---
 
-## 8. Database layer
+## 8. Database layer — `server/db/`
 
-- **Swappable** via `DB_CLIENT` = `mock` | `mssql` | `postgres`. `server/db/index.js`
-  is the only switch; every adapter exposes the same interface:
-  `search(term) -> [{jtcNo, partName}]`, `getOne(no) -> record | null`, `close()`.
-- **Currently `postgres`.** The real SQL lives in `server/db/queries.js`.
-- The `getOne` record shape the rest of the app expects:
-  `{ jtcNo, customer, partName, partNo, model, date, qty, woNo, barcodeId }`.
-- **Real-data quirks handled in the SQL/app:**
-  - `ordernumber` (the JTC No) contains **spaces, trailing spaces, batch suffixes
-    like `(33/46)`, and slashes** → lookup uses a **query param** (`?no=`, not a
-    path param), matches with `btrim(...)`, and also matches by `jtc_barcodeId`
-    so scanning the printed barcode resolves the job.
-  - The join to `jtc_maps_jp` duplicates rows → `search` uses `GROUP BY` to dedupe.
-  - No UOM column → the label's "PCS" is static template text; `DEFAULT_UOM`
-    exists as a fallback for any future use.
+Swappable via `DB_CLIENT` = `mssql` (**active**) | `postgres` | `mock`. Every
+adapter exposes `search(term)`, `getOne(no)`, `close()`. The record shape the app
+expects: `{ jtcNo, customer, partName, partNo, model, date, qty, barcodeId,
+coNo, empNo, stockCode, processCode }`.
 
-Tables involved (Postgres): `public.maps_job j` (jobs; `ordernumber`, `quantity`,
-`actualenddate`, `customerid`, `productid`), `public.maps_customer` (`name`),
-`public.maps_product` (`name`, `partnumber`), `public.jtc_maps_jp jp` (joined on
-`jp."jtc_orderNumber" = j.ordernumber`; has `jtc_WO`, `jtc_PartNumber`,
-`jtc_barcodeId`).
+### SQL Server (`dbo.*`, the active source) — see `queries.js` `mssql`
+`getOne` joins from `Job`:
+- `Job.OrderNumber` → **jtcNo** (JTC No); `Job.Id` → **barcodeId** (the printed
+  barcode encodes `*j` + Job.Id); `Job.Quantity` → qty; `Job.CreateDate` → date.
+- `Job.CustomerId → Customer.Name` → customer.
+- `Job.ProductId → Product` → partName (`.Name`), partNo (`.PartNumber`);
+  `Product.SubProductGroupId → SubProductGroup.Name` → model.
+- `Job.COItemId → CustomerOrderItem.CustomerOrderId → CustomerOrder.OrderNumber`
+  → **coNo** (C/O No).
+- `Job.CreatedBy → [User].EmployeeNum` → empNo.
+- **Routing (Flow)** via `Job.ProductFlowRevId` (or the product's default
+  `FlowRevision`): `stockCode` = the FG-output node (`FlowType=2`) `StockCode`;
+  `processCode` = all process steps (`FlowType=1`) `ProcessCodeName` joined in
+  flow order. ⚠ **These two are assumptions flagged in `queries.js`** — verify
+  against a known-good Work Order label; the FlowType meanings may need tuning.
+- **search** matches `OrderNumber LIKE @jtc` **OR** `Job.Id` (so scanning the
+  printed barcode resolves the job); `GROUP BY OrderNumber` dedupes; TOP 10.
+- **Named instance**: `MSSQL_INSTANCE=SQLEXPRESS` (host in `MSSQL_SERVER`) — the
+  adapter uses instanceName (SQL Browser) and ignores `MSSQL_PORT`. If the
+  instance is on a static port, leave `MSSQL_INSTANCE` blank and set the port.
+- Test connectivity without touching the app: `node scripts/check-mssql.js`.
+
+### PostgreSQL (legacy alternative) — `queries.js` `postgres`
+`maps_job` ⟕ `maps_customer`/`maps_product` ⟕ `jtc_maps_jp` (history table →
+`ORDER BY … LIMIT 1` picks latest). Matches ordernumber or barcode id.
 
 ---
 
-## 9. HTTP API (this app, port 3000)
+## 9. Print queue — `server/printQueue.js` (+ `spooler.js`)
+
+The operator-facing queue. Persisted to `print-jobs.json` (gitignored); survives
+restarts and power cuts.
+
+**Job lifecycle:** `queued → printing → done` (or `error` for a bad JTC).
+`printing` means "handed to the Windows spooler," not "physically printed."
+
+**Worker (one job at a time, only when not paused):**
+1. Render TSPL; a data error (unknown JTC / bad template) → `error`, **skip**
+   (does not pause the run).
+2. Readiness check via `agent.printerStatus` (agent reachable / not offline).
+3. Send to the agent, poll `/print/status` until `SUCCESS`/`FAILED`.
+4. **Verify it drained** — poll `queueDepth` until 0. The agent's SUCCESS only
+   means the label reached the Windows spooler; a healthy printer drains it to 0,
+   a dead one doesn't.
+
+**On any printer/comms failure → pause** (never silently drop). The stuck label
+is **pulled back out of the Windows spooler** (`spooler.clear` → PowerShell
+`Remove-PrintJob`, local-agent only) and re-queued, so it will **not auto-print
+when the printer wakes** — nothing prints until the operator clicks **Resume**.
+Resume then drains the whole backlog in order.
+
+**Startup:** loads the persisted queue; starts **paused if there's a backlog**
+(so a power-cut restart waits for a human), **running if empty** (so the first
+scan of the day prints hands-free).
+
+**UI (queue panel):** shows `#`print-order, JTC No, the **label type** (tab name),
+and status; a red paused banner with the reason + next job; **Resume / Pause /
+Clear done**. Wording is honest: **"Sent to printer"** (not "Printed"), because
+media-out is invisible to Windows (see §12).
+
+**Endpoints:** `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear}`.
+Tunable: `QUEUE_DRAIN_TIMEOUT_MS` (default 12000), `QUEUE_DRAIN_POLL_MS`.
+
+---
+
+## 10. Destinations ("tabs") — `locations.json` + `server/locations.js`
+
+One universal file lists every printer/label combo; the **same file deploys to
+every terminal**, and each operator picks their tab (remembered in `localStorage`).
+A tab bundles everything that differs per job:
+
+```json
+{ "id":"fg-sticker-qc", "name":"P1 FG Sticker (QC)", "templateId":"12",
+  "variant":"qc", "barcodeNudge":16 }
+```
+Optional per-tab overrides: `agentUrl` (default `AGENT_URL`, i.e. the local
+printer — set an address only for a tab that drives another machine's printer),
+`printerType`. Only `id` + `name` are required; the rest fall back to `.env`.
+With no `locations.json`, a single default tab is synthesized from `.env`.
+
+Current tabs: **FG Sticker (QC)** → tpl 12, **FG Sticker (Plain)** → tpl 11,
+**Work Order (P3)** → tpl 13. `GET /api/locations` feeds the tab bar (agentUrl is
+kept server-side). Every print/preview/model/status/reload call carries
+`?location=<id>` (or in the POST body); the server resolves it to the tab.
+
+---
+
+## 11. HTTP API (this app, port 3000)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` , `/vendor/JsBarcode.all.min.js` | Static page + local barcode lib |
 | GET | `/api/config` | `{companyName, defaultUom}` |
-| GET | `/api/jtc/search?q=` | Suggestions `[{jtcNo, partName}]` (Postgres) |
-| GET | `/api/jtc?no=` | Full record for one JTC (Postgres) |
-| GET | `/api/label/model?no=` | Resolved geometry for the SVG preview |
-| GET | `/api/print/preview?no=` | The rendered TSPL text (no printing) |
-| POST | `/api/print` `{jtcNo}` | Render + send to print-agent → `{jobId}` |
-| GET | `/api/print/status/:jobId` | Agent job status (passthrough) |
-| GET | `/api/printer/status` | Agent/printer health (passthrough) |
-| POST | `/api/template/reload` | Force-refetch the MES template (clears cache) |
-
-**Upstream calls this app makes:** Postgres (via `pg`); MES
-`GET /api/label-templates/{LABEL_TEMPLATE_ID}`; agent `POST /print-label`,
-`GET /print/status/:jobId`, `GET /printer/status`.
+| GET | `/api/locations` | Tab list `[{id,name,templateId,variant}]` |
+| GET | `/api/jtc/search?q=` | Suggestions `[{jtcNo, partName}]` |
+| GET | `/api/jtc?no=` | Full record for one JTC (query param — JTC Nos contain `/`, spaces) |
+| GET | `/api/label/model?no=&location=` | Geometry for the SVG preview |
+| GET | `/api/print/preview?no=&location=` | Rendered TSPL text (no printing) |
+| POST | `/api/print` `{jtcNo, location}` | **Enqueue** a print → `{queued, id}` |
+| GET | `/api/queue` | Queue snapshot `{paused, jobs[]}` |
+| POST | `/api/queue/pause` \| `/resume` \| `/remove` \| `/clear` | Queue control |
+| GET | `/api/print/status/:jobId?location=` | Agent job status (passthrough) |
+| GET | `/api/printer/status?location=` | Agent/printer health (passthrough) |
+| POST | `/api/template/reload` `{location}` | Force-refetch that tab's MES template |
 
 ---
 
-## 10. Configuration (`.env`)
+## 12. Key decisions & gotchas (hard-won — don't re-learn)
+
+- **We render TSPL ourselves;** the MES render endpoint only produces sample data.
+- **Field keys are fixed + exact.** The MES catalog is a closed list — you cannot
+  invent `jtcNumber`/`coNo`/`customer` keys in the designer. To add a label field
+  you must (a) have the MES add the key to its catalog, (b) bind the element to
+  it, and (c) have `mapRecordToFields` return that exact key. Values for
+  `customer/partNo/model/customerOrder` are already fetched; they print blank only
+  because the MES has no bound keys for them yet.
+- **The field-key names read "backwards" in places** because the templates were
+  pre-bound. Follow the comments in `mapRecord.js`/`queries.js`.
+- **Media-out is invisible to software.** When the TE244 runs out mid-print,
+  Windows still drains the spooler and reports the printer Normal/Idle
+  (`DetectedErrorState 0`, `hasError false`). So the queue cannot auto-detect
+  out-of-labels — it shows **"Sent to printer"** and relies on the operator
+  seeing the red light + the printer's own buffer (it reprints held jobs on feed).
+- **The agent's `online` flag is unreliable** (`-not $printer.Offline` is always
+  true for a USB printer, even unplugged). The queue keys off **`queueDepth`
+  draining** instead, which *is* reliable for "off/unplugged" (spooler holds).
+- **`copy` to the Windows share succeeds even with no printer** — the spooler
+  accepts the bytes. Hence the drain check, not the send result, is the signal.
+- **One print-agent per terminal.** Duplicate processes with the same `agentId`
+  cause a relay connect/disconnect flap and break printing.
+- **Barcode** encodes `*j` + `Job.Id`; skipped if none; centered under a QC box
+  only when a "QC CHOP" caption is present; printed position tuned per-tab.
+- **Byte-match** with the MES renderer for text/bar/box; barcode line diverges.
+
+---
+
+## 13. Configuration (`.env` + `locations.json`)
+
+`.env` (per-terminal, gitignored) holds **global defaults + secrets**; per-tab
+values live in `locations.json`.
 
 | Var | Meaning |
 |---|---|
-| `DB_CLIENT` | `postgres` (active) \| `mssql` \| `mock` |
+| `DB_CLIENT` | `mssql` (active) \| `postgres` \| `mock` |
 | `PORT` | Web server port (3000) |
-| `COMPANY_NAME`, `DEFAULT_UOM` | Minor UI/fallback values |
-| `PG_HOST/PORT/DATABASE/USER/PASSWORD/SSL` | Postgres connection (remote) |
-| `MSSQL_*` | SQL Server connection (unused unless DB_CLIENT=mssql) |
-| `MES_BASE_URL` | MES base (`…:8081`) — where templates are fetched |
-| `LABEL_TEMPLATE_ID` | Which template to use (`11` = P1 FG Sticker) |
+| `MSSQL_SERVER/INSTANCE/PORT/DATABASE/USER/PASSWORD/ENCRYPT/TRUST_SERVER_CERT` | SQL Server conn |
+| `PG_*` | Postgres conn (legacy) |
+| `MES_BASE_URL` | MES base (`…:8081`) |
+| `LABEL_TEMPLATE_ID` | Default template when a tab omits `templateId` |
 | `TEMPLATE_TTL_MS` | Template cache lifetime (default 5 min) |
-| `AGENT_URL` | Local print-agent (`http://localhost:9000`) |
-| `PRINTER_TYPE` | `tsc` \| `hprt` |
-| `BARCODE_NUDGE_DOTS` | Print-only barcode horizontal calibration (read live) |
+| `AGENT_URL` | Default print-agent (`http://localhost:9000`) |
+| `PRINTER_TYPE` | Default `tsc` \| `hprt` |
+| `LABEL_VARIANT` | Default `qc` \| `plain` when a tab omits `variant` |
+| `BARCODE_NUDGE_DOTS` | Default barcode calibration when a tab omits `barcodeNudge` |
+| `QUEUE_DRAIN_TIMEOUT_MS` / `QUEUE_DRAIN_POLL_MS` | Spooler-drain verification timing |
 
 ---
 
-## 11. Running it
+## 14. Running
 
 ```bash
 npm install
 npm start           # -> http://localhost:3000
 ```
-- Physical printing requires the **print-agent** running on the terminal (:9000)
-  and the TSC TE244 reachable.
-- Runs on **mock** data with no DB (`DB_CLIENT=mock`).
+- Physical printing needs the **print-agent** running on the terminal (:9000) and
+  the TE244 reachable (USB share `TSC_TE244`).
+- `DB_CLIENT=mock` runs with no DB.
 
 **What reloads how:**
-- **Code changes (`.js`)** → require a **server restart** (Node caches modules).
-  Ensure only ONE server on port 3000 (a second silently fails to bind).
-- **MES template changes** → click **Reload template** in the UI, or restart.
-- **`BARCODE_NUDGE_DOTS`** → read live from `.env` on each print (no restart).
+- **`.js` changes** → **restart the app** (Node caches modules). One server per port.
+- **`locations.json`** → read live (no restart); the tab bar updates on next poll.
+- **MES template edits** → **Reload template** button, or wait ≤ TTL, or restart.
+- **`BARCODE_NUDGE_DOTS`** → read live per print.
 
 ---
 
-## 12. Key decisions & gotchas (so you don't re-learn them)
+## 15. Common extension tasks
 
-- **We render TSPL ourselves;** the MES render endpoint only produces sample data.
-- **Field keys are exact, case-sensitive.** To add a label field: the MES template
-  must bind a slot to a key, and `mapRecordToFields` must return that same key.
-- **Customer / Part No / Model print blank** today: our DB has the values
-  (`customer`, `partNo`, `model` are already in `mapRecordToFields`), but the MES
-  template has no slots bound to them AND the MES field catalog doesn't list them
-  yet. Once the MES adds those fields, match the key spelling in `mapRecord.js`.
-- **All fixed wording** (company name, "Customer", "QC CHOP", colons, "PCS") are
-  **static text in the MES template**, not in our code.
-- **Barcode** encodes `*j` + `jtc_barcodeId`; skipped if none; centered under the
-  QC box; print position fine-tuned with `BARCODE_NUDGE_DOTS`.
-- **Byte-match:** our TSPL equals the MES renderer for text/bar/box; the barcode
-  line intentionally diverges.
-- **The remote Postgres is the real one;** localhost:5432 on the dev box is a
-  different, unrelated database.
-
----
-
-## 13. Common extension tasks
-
-- **Add a new field to the label:** (1) MES designer adds a slot bound to a key;
-  (2) ensure `mapRecordToFields` returns that key from the DB record; (3) if the
-  DB column is new, add it to `queries.js` `getOne` with the right `AS "alias"`.
-- **Change how many search results show:** `LIMIT` in `queries.js` `postgres.search`.
-- **Point at a different template:** `LABEL_TEMPLATE_ID` in `.env`.
-- **Switch DB engine:** change `DB_CLIENT` + fill the matching connection block +
-  put real SQL in `queries.js`. Adapters already share one interface.
-- **Move the barcode / calibrate print:** `BARCODE_NUDGE_DOTS` (live) or the
-  centering logic in `barcodeLayout.js`.
-- **Support a new template element type:** add a case in `render.js`
-  `renderElement` and in `model.js` + `labelPreview.js` `drawElement`.
+- **Finish C/O No:** MES adds a catalog key for it → bind the "C/O No" element →
+  rename the `customerOrder` LEFT key in `mapRecord.js` to that key (value side is
+  already `r.coNo`).
+- **Add a destination:** add an object to `locations.json` (`id`, `name`,
+  `templateId`, `variant`, `barcodeNudge`; optional `agentUrl`). No restart.
+- **Add a label field:** MES catalog key + designer binding + `mapRecordToFields`
+  returns that key (+ `queries.js` `getOne` selects the column `AS alias` if new).
+- **Tune Stock/Process code:** the FlowType assumptions in `queries.js` `mssql.getOne`.
+- **Switch DB engine:** `DB_CLIENT` + the matching conn block + SQL in `queries.js`.
+- **Calibrate print:** per-tab `barcodeNudge` in `locations.json` (live).
+- **New element type:** add a case in `render.js` `renderElement` **and**
+  `model.js`/`labelPreview.js` `drawElement`.
