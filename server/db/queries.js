@@ -30,8 +30,13 @@ module.exports = {
   //   qty       = Job.Quantity          barcodeId   = Job.Id
   //   empNo     = User.EmployeeNum (via Job.CreatedBy)
   //   stockCode / processCode = Flow (see the ⚠ ASSUMPTIONS on getOne below)
-  // The "W/O No" label field is the JTC No itself (see mapRecord woNumber),
-  // so there's no MO join. Tables are dbo.* — the pool connects to MSSQL_DATABASE.
+  //   coNo      = CustomerOrder.OrderNumber (C/O No) via
+  //               Job.COItemId -> CustomerOrderItem -> CustomerOrder
+  // coNo is LEFT JOINed, so make-to-stock jobs (no customer order) blank it.
+  // jtcNo (Job.OrderNumber) and coNo are DISTINCT — the C/O No is never the JTC
+  // No. NOTE: mapRecord carries jtcNo in the `woNumber` field key and coNo in
+  // `coNumber` (that's how the MES template binds "JTC No" and "C/O No").
+  // Tables are dbo.* — the pool connects to MSSQL_DATABASE.
   mssql: {
     // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
     // so both surface results. GROUP BY OrderNumber dedupes when several jobs
@@ -71,7 +76,7 @@ module.exports = {
         spg.Name          AS model,
         j.CreateDate      AS date,
         j.Quantity        AS qty,
-        mo.Field1         AS woNo,
+        co.OrderNumber    AS coNo,
         j.Id              AS barcodeId,
         u.EmployeeNum     AS empNo,
         (SELECT TOP 1 f.StockCode
@@ -88,8 +93,9 @@ module.exports = {
       LEFT JOIN dbo.Customer         c   ON c.Id   = j.CustomerId
       LEFT JOIN dbo.Product          p   ON p.Id   = j.ProductId
       LEFT JOIN dbo.SubProductGroup  spg ON spg.Id = p.SubProductGroupId
-      LEFT JOIN dbo.MO               mo  ON mo.Id  = j.MOId
-      LEFT JOIN dbo.[User]           u   ON u.Id   = j.CreatedBy
+      LEFT JOIN dbo.CustomerOrderItem coi ON coi.Id  = j.COItemId
+      LEFT JOIN dbo.CustomerOrder     co  ON co.Id   = coi.CustomerOrderId
+      LEFT JOIN dbo.[User]            u   ON u.Id    = j.CreatedBy
       OUTER APPLY (
         SELECT COALESCE(
           j.ProductFlowRevId,

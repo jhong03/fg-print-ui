@@ -33,6 +33,7 @@ initLocations();
  */
 const LOC_KEY = 'jtc.locationId';
 let currentLocation = null;   // { id, name, templateId, variant } or null
+let locationName = {};        // id -> friendly name, for labelling queued jobs
 
 // The location query string appended to GETs (empty until tabs load; the server
 // then falls back to the first tab, so a print is never mis-routed silently).
@@ -49,10 +50,14 @@ async function initLocations() {
   } catch (_) {
     return; // no tabs — the server still prints to its default destination
   }
-  if (!Array.isArray(list) || list.length <= 1) return; // nothing to switch
+  if (!Array.isArray(list) || !list.length) return;
+
+  // id -> name, so the queue can label each job with its destination.
+  locationName = Object.fromEntries(list.map((l) => [l.id, l.name]));
 
   const savedId = localStorage.getItem(LOC_KEY);
   currentLocation = list.find((l) => l.id === savedId) || list[0];
+  if (list.length <= 1) return; // only one destination — no tab bar to show
 
   tabs.innerHTML = '';
   list.forEach((loc) => {
@@ -146,7 +151,9 @@ async function acceptScan(q) {
   // Show the resolved JTC No — a scanned barcode id isn't the order number.
   input.value = record.jtcNo || q;
   renderLabel(record);
-  setStatus('');
+  // A scan queues the print hands-free — no button press. (Manual lookups still
+  // wait for the Print Label button.)
+  enqueuePrint(record.jtcNo || q, { fromScan: true });
   input.select();   // leave it selected so the next scan replaces it
 }
 
@@ -305,29 +312,35 @@ function setStatus(msg, isError) {
 // ---- Actions --------------------------------------------------------------
 let currentJtc = null;
 
-printBtn.addEventListener('click', async () => {
+// Manual print: the button queues the currently-shown JTC.
+printBtn.addEventListener('click', () => {
   if (!currentJtc) return;
-  printBtn.disabled = true;
-  const original = printBtn.textContent;
-  printBtn.textContent = 'Printing…';
-  setStatus('Sending label to printer…');
+  enqueuePrint(currentJtc, { fromScan: false });
+});
+
+/*
+ * Queue a print. Both the scan path and the Print Label button funnel through
+ * here, so a job is never printed directly — it always joins the resilient queue
+ * that survives printer stalls and power cuts. `fromScan` only tweaks the wording.
+ */
+async function enqueuePrint(jtcNo, { fromScan } = {}) {
   try {
     const res = await fetch('/api/print', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jtcNo: currentJtc, location: currentLocation?.id }),
+      body: JSON.stringify({ jtcNo, location: currentLocation?.id }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body.success) throw new Error(body.error || 'Print failed');
-    const where = currentLocation ? ' · ' + currentLocation.name : '';
-    setStatus('Label sent to printer (job ' + body.jobId + ')' + where + '.');
+    if (!res.ok || !body.success) throw new Error(body.error || 'Could not queue');
+    const verb = fromScan ? 'Scanned & queued' : 'Queued';
+    setStatus(body.paused
+      ? verb + ' ' + jtcNo + ' — queue is paused, press Resume to print.'
+      : verb + ' ' + jtcNo + ' for printing.');
+    refreshQueue();
   } catch (e) {
     setStatus(e.message, true);
-  } finally {
-    printBtn.disabled = false;
-    printBtn.textContent = original;
   }
-});
+}
 
 // Fetch the rendered TSPL for the current JTC + destination into the panel.
 async function refreshTspl() {
@@ -410,3 +423,113 @@ clearBtn.addEventListener('click', () => {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.search__box')) hideSuggestions();
 });
+
+// ---- Print queue ----------------------------------------------------------
+/*
+ * Shows what's waiting so an operator knows what prints next, and surfaces the
+ * paused state after a stall (label/ribbon out, power/comms drop) with a Resume
+ * button. The queue lives on the server and survives restarts; we just poll it.
+ */
+const queuePanel = document.getElementById('queuePanel');
+const queueList = document.getElementById('queueList');
+const queueState = document.getElementById('queueState');
+const queueBanner = document.getElementById('queueBanner');
+const resumeBtn = document.getElementById('resumeBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const clearQueueBtn = document.getElementById('clearQueueBtn');
+
+// Honest wording: the app only knows a label was handed to the printer (left
+// the spooler), NOT that it physically came out — media-out is invisible to
+// Windows here. So a finished job is "Sent to printer", never a definitive
+// "Printed"; anything not out yet reads as clearly not-done.
+const STATUS_LABEL = {
+  queued: 'Waiting',
+  printing: 'Sending…',
+  done: 'Sent to printer',
+  error: 'Not printed',
+};
+
+async function refreshQueue() {
+  let q;
+  try {
+    q = await (await fetch('/api/queue')).json();
+  } catch (_) {
+    return; // transient; the poll will retry
+  }
+  renderQueue(q);
+}
+
+function renderQueue(q) {
+  const pending = q.jobs.filter((j) => j.status === 'queued' || j.status === 'printing');
+  // Hide the panel entirely when there's nothing to show and all is well.
+  queuePanel.hidden = q.jobs.length === 0 && !q.paused;
+
+  const next = pending[0];
+  if (q.paused && pending.length) {
+    queueState.textContent = 'Paused · ' + pending.length + ' waiting';
+    queueState.className = 'queue__state queue__state--paused';
+    queueBanner.hidden = false;
+    queueBanner.textContent =
+      'Printer paused. Check labels/ribbon and feed if needed, then Resume'
+      + (next ? ' — next: ' + next.jtcNo : '') + '.';
+  } else if (pending.length) {
+    queueState.textContent = 'Printing · ' + pending.length + ' in queue';
+    queueState.className = 'queue__state queue__state--busy';
+    queueBanner.hidden = true;
+  } else {
+    queueState.textContent = 'Idle';
+    queueState.className = 'queue__state';
+    queueBanner.hidden = true;
+  }
+
+  resumeBtn.hidden = !q.paused;
+  pauseBtn.hidden = q.paused || !pending.length;
+  clearQueueBtn.hidden = !q.jobs.some((j) => j.status === 'done' || j.status === 'error');
+
+  queueList.innerHTML = '';
+  // Pending shown in PRINT ORDER with a queue number (#1 = next out); finished
+  // jobs follow as history (most recent first), unnumbered.
+  const finished = q.jobs.filter((j) => j.status === 'done' || j.status === 'error').reverse();
+  const rows = pending.map((j, i) => ({ j, num: i + 1 })).concat(finished.map((j) => ({ j, num: null })));
+
+  rows.forEach(({ j, num }) => {
+    const li = document.createElement('li');
+    // Flag by problem, not status: a held/queued job carrying an error reads red
+    // too, so operators see "not printed" at a glance.
+    li.className = 'q-item q-' + j.status + (j.error ? ' q-problem' : '');
+
+    const n = document.createElement('span');
+    n.className = 'q-num';
+    n.textContent = num ? '#' + num : '';
+
+    const jtc = document.createElement('span');
+    jtc.className = 'q-jtc';
+    jtc.textContent = j.jtcNo;
+
+    const type = document.createElement('span');
+    type.className = 'q-type';
+    type.textContent = locationName[j.location] || j.location || '';
+
+    const st = document.createElement('span');
+    st.className = 'q-status';
+    st.textContent = j.error ? (STATUS_LABEL[j.status] + ': ' + j.error) : STATUS_LABEL[j.status];
+
+    li.append(n, jtc, type, st);
+    queueList.appendChild(li);
+  });
+}
+
+async function queueAction(path) {
+  try {
+    renderQueue(await (await fetch('/api/queue/' + path, { method: 'POST' })).json());
+  } catch (e) {
+    setStatus('Queue action failed: ' + e.message, true);
+  }
+}
+
+resumeBtn.addEventListener('click', () => queueAction('resume'));
+pauseBtn.addEventListener('click', () => queueAction('pause'));
+clearQueueBtn.addEventListener('click', () => queueAction('clear'));
+
+refreshQueue();
+setInterval(refreshQueue, 2000);

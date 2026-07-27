@@ -44,6 +44,10 @@ function mapRecordToFields(r) {
     customer: r.customer || '',
     partNo: r.partNo || '',
     model: r.model || '',
+    // Value side wired to the query (co.OrderNumber AS coNo). Only the LEFT key
+    // ("customerOrder") is a placeholder — rename it to the real MES field key
+    // once that's created, then bind the "C/O No" element to it in the designer.
+    customerOrder: r.coNo || '',
 
     // Work Order label fields (SQL Server; empty on data sources that omit them).
     stockCode: r.stockCode || '',

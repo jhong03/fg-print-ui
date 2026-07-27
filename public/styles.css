@@ -70,6 +70,69 @@ html, body {
   border-bottom: 1px solid var(--surface);
 }
 
+/* ---- Print queue ---- */
+.queue {
+  margin-top: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.queue__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.queue__title { font-weight: 600; }
+.queue__state { font-size: 14px; color: var(--ink-soft); }
+.queue__state--busy { color: var(--accent); }
+.queue__state--paused { color: var(--danger); font-weight: 600; }
+.queue__controls { margin-left: auto; display: flex; gap: 8px; }
+.btn--sm { padding: 6px 12px; font-size: 14px; }
+.queue__banner {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fbeceb;
+  color: var(--danger);
+  font-size: 14px;
+}
+.queue__list { list-style: none; margin: 12px 0 0; padding: 0; }
+.q-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.q-num {
+  min-width: 28px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.q-jtc { font-family: var(--mono); font-weight: 700; }
+.q-type {
+  color: var(--ink-soft);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.q-status { margin-left: auto; color: var(--ink-soft); text-align: right; }
+.q-printing .q-status { color: var(--accent); }
+/* Anything with a problem (errored, or held/not-printed) stands out red so an
+   operator never mistakes it for done. Normal "Waiting" stays neutral. */
+.q-problem { color: var(--danger); }
+.q-problem .q-status { color: var(--danger); font-weight: 600; }
+/* "Sent to printer" is neutral/muted — handed off, but not a confirmed print. */
+.q-done { opacity: 0.6; }
+
+.queue__note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
 /* ---- Search ---- */
 .search { margin-bottom: 32px; }
 

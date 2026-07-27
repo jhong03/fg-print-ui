@@ -9,6 +9,7 @@ const { mapRecordToFields } = require('./label/mapRecord');
 const { buildModel } = require('./label/model');
 const agent = require('./agent');
 const locations = require('./locations');
+const printQueue = require('./printQueue');
 
 const app = express();
 app.use(express.json());
@@ -126,24 +127,26 @@ app.get('/api/label/model', async (req, res) => {
   }
 });
 
-// Render a JTC label and send it to the destination's print agent.
-// POST /api/print { jtcNo, location }
-app.post('/api/print', async (req, res) => {
+// Queue a JTC label for printing. POST /api/print { jtcNo, location }
+// Used by both a scan (auto-queued by the front-end) and the Print Label button.
+// The queue worker renders + sends one job at a time and confirms each print;
+// see printQueue.js. The JTC is validated at print time, not here.
+app.post('/api/print', (req, res) => {
   const no = (req.body?.jtcNo || '').trim();
   if (!no) return res.status(400).json({ error: 'Missing jtcNo' });
-  try {
-    const record = await db.getOne(no);
-    if (!record) return res.status(404).json({ error: 'JTC not found' });
-    const loc = resolveLocation(req);
-    const template = await getTemplate(loc.templateId);
-    const tspl = renderTspl(template, mapRecordToFields(record), printOptsFor(loc));
-    const result = await agent.printLabel(tspl, loc);
-    res.json({ success: true, jobId: result.jobId, location: loc.id });
-  } catch (err) {
-    console.error('[print]', err.message);
-    res.status(502).json({ error: err.message });
-  }
+  const loc = resolveLocation(req);
+  const r = printQueue.add(no, loc.id);
+  res.json({ success: true, queued: true, id: r.id, position: r.position, paused: r.paused });
 });
+
+// ---- Print queue ----------------------------------------------------------
+// Operator-facing queue: what's waiting, and pause/resume so a run can be held
+// while media/ribbon is reloaded and only continued on an explicit Resume.
+app.get('/api/queue', (req, res) => res.json(printQueue.list()));
+app.post('/api/queue/pause', (req, res) => { printQueue.pause(); res.json(printQueue.list()); });
+app.post('/api/queue/resume', (req, res) => { printQueue.resume(); res.json(printQueue.list()); });
+app.post('/api/queue/remove', (req, res) => { printQueue.remove(req.body?.id); res.json(printQueue.list()); });
+app.post('/api/queue/clear', (req, res) => { printQueue.clearFinished(); res.json(printQueue.list()); });
 
 // Poll a print job. GET /api/print/status/:jobId?location=...
 app.get('/api/print/status/:jobId', async (req, res) => {
