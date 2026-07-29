@@ -59,7 +59,11 @@ module.exports = {
         p.Name            AS partName,
         p.PartNumber      AS partNo,
         spg.Name          AS model,
-        j.CreateDate      AS date,
+        -- Format the date in SQL (style 103 = dd/mm/yyyy) so it can't be shifted
+        -- by JS timezone conversion. CreateDate is a tz-less wall-clock datetime;
+        -- the driver would otherwise read it as UTC and a late-afternoon time
+        -- would roll to the next day when rendered in local (+8) time.
+        CONVERT(varchar(10), j.CreateDate, 103) AS date,
         j.Quantity        AS qty,
         co.OrderNumber    AS coNo,
         j.Id              AS barcodeId,
