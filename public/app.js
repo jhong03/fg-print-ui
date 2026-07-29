@@ -434,9 +434,15 @@ const queuePanel = document.getElementById('queuePanel');
 const queueList = document.getElementById('queueList');
 const queueState = document.getElementById('queueState');
 const queueBanner = document.getElementById('queueBanner');
+const autoState = document.getElementById('autoState');
 const resumeBtn = document.getElementById('resumeBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const clearQueueBtn = document.getElementById('clearQueueBtn');
+
+// Latest auto-print watcher status (null until first /api/auto poll). Kept here
+// so renderQueue can keep the panel visible while the station is auto-watching,
+// even when the queue itself is momentarily empty.
+let autoStatus = null;
 
 // Honest wording: the app only knows a label was handed to the printer (left
 // the spooler), NOT that it physically came out — media-out is invisible to
@@ -461,8 +467,11 @@ async function refreshQueue() {
 
 function renderQueue(q) {
   const pending = q.jobs.filter((j) => j.status === 'queued' || j.status === 'printing');
-  // Hide the panel entirely when there's nothing to show and all is well.
-  queuePanel.hidden = q.jobs.length === 0 && !q.paused;
+  // Hide the panel entirely when there's nothing to show and all is well — but
+  // keep it up while this station is auto-watching, so the operator can see it's
+  // armed even with an empty queue.
+  const autoWatching = !!(autoStatus?.enabled && autoStatus?.started);
+  queuePanel.hidden = q.jobs.length === 0 && !q.paused && !autoWatching;
 
   const next = pending[0];
   if (q.paused && pending.length) {
@@ -531,5 +540,34 @@ resumeBtn.addEventListener('click', () => queueAction('resume'));
 pauseBtn.addEventListener('click', () => queueAction('pause'));
 clearQueueBtn.addEventListener('click', () => queueAction('clear'));
 
+// ---- Auto-print status badge ----------------------------------------------
+// Shows whether THIS station is auto-watching for completed jobs, which
+// destinations it serves, and when it last checked — so an operator can see the
+// hands-free path is armed without reading logs.
+async function refreshAuto() {
+  try {
+    autoStatus = await (await fetch('/api/auto')).json();
+  } catch (_) {
+    return; // transient; the poll will retry
+  }
+  renderAuto();
+}
+
+function renderAuto() {
+  if (!autoStatus?.enabled) { autoState.hidden = true; return; }
+  autoState.hidden = false;
+  const names = (autoStatus.ownedLocations || [])
+    .map((id) => locationName[id] || id)
+    .join(', ') || '(none configured)';
+  const t = autoStatus.lastPoll ? new Date(autoStatus.lastPoll).toLocaleTimeString() : '—';
+  let txt = 'Auto-print: watching ' + names + ' · checked ' + t;
+  autoState.classList.toggle('queue__auto--err', !!autoStatus.lastError);
+  if (autoStatus.lastError) txt += ' · error';
+  autoState.textContent = txt;
+  autoState.title = autoStatus.lastError || '';
+}
+
 refreshQueue();
 setInterval(refreshQueue, 2000);
+refreshAuto();
+setInterval(refreshAuto, 5000);

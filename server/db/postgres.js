@@ -46,6 +46,16 @@ async function getOne(jtcNo) {
   return rows[0] || null;
 }
 
+async function getCompletedSince(since) {
+  const { rows } = await getPool().query(sql.getCompletedSince, [since]);
+  return rows;
+}
+
+async function getLatestCompletionMark() {
+  const { rows } = await getPool().query(sql.latestCompletion);
+  return rows[0]?.m || null;
+}
+
 async function close() {
   if (pool) {
     await pool.end();
@@ -53,4 +63,4 @@ async function close() {
   }
 }
 
-module.exports = { search, getOne, close };
+module.exports = { search, getOne, getCompletedSince, getLatestCompletionMark, close };

@@ -1,4 +1,6 @@
 node_modules/
 .env
 npm-debug.log*
+# Per-machine runtime state — auto-generated, must never be committed
 print-jobs.json
+auto-print-state.json

@@ -10,6 +10,7 @@ const { buildModel } = require('./label/model');
 const agent = require('./agent');
 const locations = require('./locations');
 const printQueue = require('./printQueue');
+const autoPrint = require('./autoPrint');
 
 const app = express();
 app.use(express.json());
@@ -28,7 +29,7 @@ function resolveLocation(req) {
 
 // Everything renderTspl/buildModel need, taken from the resolved location.
 function printOptsFor(loc) {
-  return { variant: loc.variant, barcodeNudge: loc.barcodeNudge };
+  return { variant: loc.variant, barcodeNudge: loc.barcodeNudge, upright: loc.upright };
 }
 
 // ---- Static assets --------------------------------------------------------
@@ -148,6 +149,53 @@ app.post('/api/queue/resume', (req, res) => { printQueue.resume(); res.json(prin
 app.post('/api/queue/remove', (req, res) => { printQueue.remove(req.body?.id); res.json(printQueue.list()); });
 app.post('/api/queue/clear', (req, res) => { printQueue.clearFinished(); res.json(printQueue.list()); });
 
+// Auto-print watcher status (for the UI badge + diagnostics). GET /api/auto
+app.get('/api/auto', (req, res) => res.json(autoPrint.status()));
+
+// Simulate a completion for a REAL existing JTC — routes by model and enqueues
+// it just like the watcher would, but writes NOTHING to the DB (safe against
+// production). Lets you test the trigger + routing + print without setting a
+// job's ActualEndDate. POST /api/auto/test { jtcNo, location? }
+app.post('/api/auto/test', async (req, res) => {
+  const jtcNo = (req.body?.jtcNo || '').trim();
+  if (!jtcNo) return res.status(400).json({ error: 'Missing jtcNo' });
+  try {
+    const override = (req.body?.location || '').trim() || null;
+    res.json(await autoPrint.testTrigger(jtcNo, override));
+  } catch (err) {
+    console.error('[auto/test]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Local trigger simulation (mock adapter only) --------------------------
+// A full end-to-end test of the WATCHER: flip a mock job's ActualEndDate
+// NULL <-> set and let the real poll loop detect it. HARD-guarded to
+// DB_CLIENT=mock so it can never mutate a real database.
+function devGuard(res) {
+  if (db.clientName !== 'mock') {
+    res.status(403).json({ error: 'Test controls require DB_CLIENT=mock (they never touch a real DB).' });
+    return false;
+  }
+  return true;
+}
+// Flip a mock job to completed (ActualEndDate = now). POST /api/dev/complete { jtcNo | id }
+app.post('/api/dev/complete', (req, res) => {
+  if (!devGuard(res)) return;
+  const key = String(req.body?.jtcNo ?? req.body?.id ?? '').trim();
+  const r = db.__complete(key);
+  if (!r) return res.status(404).json({ error: 'No such mock job: ' + key });
+  res.json({ ok: true, completed: r });
+});
+// Clear a mock job's completion so it can be tested again. POST /api/dev/reset { jtcNo | id }
+app.post('/api/dev/reset', (req, res) => {
+  if (!devGuard(res)) return;
+  const key = String(req.body?.jtcNo ?? req.body?.id ?? '').trim();
+  const r = db.__reset(key);
+  if (!r) return res.status(404).json({ error: 'No such mock job: ' + key });
+  res.json({ ok: true, reset: r });
+});
+
 // Poll a print job. GET /api/print/status/:jobId?location=...
 app.get('/api/print/status/:jobId', async (req, res) => {
   try {
@@ -182,6 +230,9 @@ app.post('/api/template/reload', async (req, res) => {
 // ---- Start ----------------------------------------------------------------
 const server = app.listen(PORT, () => {
   console.log(`\n  JTC Operator UI running:  http://localhost:${PORT}\n`);
+  // Start the auto-print watcher (no-op unless AUTO_PRINT_ENABLED). It polls the
+  // DB for newly-completed jobs and enqueues their labels; see autoPrint.js.
+  autoPrint.start();
 });
 
 // Clean shutdown so DB pools close properly.

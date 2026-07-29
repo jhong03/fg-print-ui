@@ -67,6 +67,15 @@ function resolveEntry(entry, d) {
   const nudge = num(entry.barcodeNudge)
     ?? num(process.env.BARCODE_NUDGE_DOTS)
     ?? 0;
+  // Turn the sideways MES design upright at print time (default). A tab can set
+  // upright:false to print vertically, exactly as designed (e.g. Work Order P3).
+  const upright = entry.upright !== false;
+  // Auto-print routing: the SubProductGroup Names (models) a completed job must
+  // match to be printed on THIS location's template/printer. Normalised to
+  // upper-case, trimmed strings for case-insensitive matching in autoPrint.js.
+  const models = Array.isArray(entry.models)
+    ? entry.models.map((m) => String(m).trim().toUpperCase()).filter(Boolean)
+    : [];
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
@@ -75,6 +84,8 @@ function resolveEntry(entry, d) {
     agentUrl: String(entry.agentUrl || d.agentUrl).replace(/\/+$/, ''),
     variant,
     barcodeNudge: nudge,
+    upright,
+    models,
   };
 }
 

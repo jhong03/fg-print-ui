@@ -37,25 +37,9 @@ module.exports = {
   // No. NOTE: mapRecord carries jtcNo in the `woNumber` field key and coNo in
   // `coNumber` (that's how the MES template binds "JTC No" and "C/O No").
   // Tables are dbo.* — the pool connects to MSSQL_DATABASE.
-  mssql: {
-    // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
-    // so both surface results. GROUP BY OrderNumber dedupes when several jobs
-    // share a JTC No; TOP 10 keeps the dropdown snappy. Newest job first.
-    search: `
-      SELECT TOP 10
-        j.OrderNumber AS jtcNo,
-        MAX(p.Name)   AS partName
-      FROM dbo.Job j
-      LEFT JOIN dbo.Product p ON p.Id = j.ProductId
-      WHERE j.OrderNumber LIKE @jtc
-         OR CAST(j.Id AS varchar(20)) LIKE @jtc
-      GROUP BY j.OrderNumber
-      ORDER BY MAX(j.Id) DESC
-    `,
-    // Full record for one job. @jtc may be the JTC No (OrderNumber) OR the
-    // barcode id (Job.Id) — so scanning the printed label resolves the job too.
-    // TRY_CONVERT keeps the Id match safe when @jtc isn't numeric. TOP 1 +
-    // ORDER BY Id DESC picks the latest job if a JTC No is reused.
+  mssql: (() => {
+    // Shared SELECT list + FROM/JOINs so getOne and getCompletedSince always
+    // return the SAME columns — maintain the field mapping in ONE place.
     // Stock Code and Process Code come from the job's routing (Flow rows).
     //
     // ⚠ ASSUMPTIONS — verify against a known-good Work Order label, then adjust:
@@ -67,8 +51,9 @@ module.exports = {
     //                 the processCode subquery's WHERE.
     // The routing is the job's ProductFlowRevId, or the product's default
     // revision when the job has none (fr OUTER APPLY).
-    getOne: `
-      SELECT TOP 1
+    const COLS = `
+        j.Id              AS jobId,
+        j.ActualEndDate   AS actualEnd,
         j.OrderNumber     AS jtcNo,
         c.Name            AS customer,
         p.Name            AS partName,
@@ -88,7 +73,8 @@ module.exports = {
                  WHERE f.FlowRevId = fr.FlowRevId AND f.FlowType = 1
                    AND NULLIF(LTRIM(RTRIM(f.ProcessCodeName)), '') IS NOT NULL
                  ORDER BY f.X, f.Id
-                 FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') AS processCode
+                 FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '') AS processCode`;
+    const FROM = `
       FROM dbo.Job j
       LEFT JOIN dbo.Customer         c   ON c.Id   = j.CustomerId
       LEFT JOIN dbo.Product          p   ON p.Id   = j.ProductId
@@ -103,12 +89,48 @@ module.exports = {
              WHERE x.ProductId = j.ProductId
              ORDER BY x.IsDefault DESC, x.Revision DESC)
         ) AS FlowRevId
-      ) fr
-      WHERE LTRIM(RTRIM(j.OrderNumber)) = LTRIM(RTRIM(@jtc))
-         OR j.Id = TRY_CONVERT(int, @jtc)
-      ORDER BY j.Id DESC
-    `,
-  },
+      ) fr`;
+    return {
+      // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
+      // so both surface results. GROUP BY OrderNumber dedupes when several jobs
+      // share a JTC No; TOP 10 keeps the dropdown snappy. Newest job first.
+      search: `
+        SELECT TOP 10
+          j.OrderNumber AS jtcNo,
+          MAX(p.Name)   AS partName
+        FROM dbo.Job j
+        LEFT JOIN dbo.Product p ON p.Id = j.ProductId
+        WHERE j.OrderNumber LIKE @jtc
+           OR CAST(j.Id AS varchar(20)) LIKE @jtc
+        GROUP BY j.OrderNumber
+        ORDER BY MAX(j.Id) DESC
+      `,
+      // Full record for one job. @jtc may be the JTC No (OrderNumber) OR the
+      // barcode id (Job.Id) — so scanning the printed label resolves the job too.
+      // TRY_CONVERT keeps the Id match safe when @jtc isn't numeric. TOP 1 +
+      // ORDER BY Id DESC picks the latest job if a JTC No is reused.
+      getOne: `
+        SELECT TOP 1 ${COLS}
+        ${FROM}
+        WHERE LTRIM(RTRIM(j.OrderNumber)) = LTRIM(RTRIM(@jtc))
+           OR j.Id = TRY_CONVERT(int, @jtc)
+        ORDER BY j.Id DESC
+      `,
+      // Auto-print watcher: every job that COMPLETED (ActualEndDate set) strictly
+      // after the caller's watermark, oldest-first so the watermark advances
+      // monotonically. TOP 200 bounds one poll; a backlog drains over ticks.
+      getCompletedSince: `
+        SELECT TOP 200 ${COLS}
+        ${FROM}
+        WHERE j.ActualEndDate IS NOT NULL
+          AND j.ActualEndDate > @since
+        ORDER BY j.ActualEndDate ASC, j.Id ASC
+      `,
+      // Seed the watermark on first run: the newest completion that ALREADY
+      // exists, so the watcher only acts on jobs that finish AFTER it starts.
+      latestCompletion: `SELECT MAX(j.ActualEndDate) AS m FROM dbo.Job j`,
+    };
+  })(),
 
   postgres: {
     // Suggestions list. Matches on the JTC No (ordernumber) OR the barcode id,
@@ -153,5 +175,32 @@ module.exports = {
       ORDER BY jp."jtc_createdAt" DESC NULLS LAST, jp."jtc_id" DESC
       LIMIT 1
     `,
+    // Auto-print watcher: jobs completed after $1 (the watermark), oldest-first.
+    // DISTINCT ON collapses the jtc_maps_jp snapshot rows to the latest per job.
+    getCompletedSince: `
+      SELECT * FROM (
+        SELECT DISTINCT ON (j.id)
+          j.id                AS "jobId",
+          j.actualenddate     AS "actualEnd",
+          c.name              AS "customer",
+          p.name              AS "partName",
+          p.partnumber        AS "partNo",
+          jp."jtc_PartNumber" AS "model",
+          j.actualenddate     AS "date",
+          j.quantity          AS "qty",
+          jp."jtc_WO"         AS "woNo",
+          j.ordernumber       AS "jtcNo",
+          jp."jtc_barcodeId"  AS "barcodeId"
+        FROM public.maps_job j
+        LEFT JOIN public.maps_customer c ON c.id = j.customerid
+        LEFT JOIN public.maps_product  p ON p.id = j.productid
+        LEFT JOIN public.jtc_maps_jp  jp ON jp."jtc_orderNumber" = j.ordernumber
+        WHERE j.actualenddate IS NOT NULL AND j.actualenddate > $1
+        ORDER BY j.id, jp."jtc_createdAt" DESC NULLS LAST
+      ) s
+      ORDER BY s."actualEnd" ASC
+      LIMIT 200
+    `,
+    latestCompletion: `SELECT MAX(actualenddate) AS m FROM public.maps_job`,
   },
 };

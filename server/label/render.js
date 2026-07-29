@@ -196,7 +196,10 @@ function renderTspl(template, values = {}, opts = {}) {
   // the label as it will actually print.
   const elements = applyVariant(template.elements || [], opts.variant);
   const heightDots = Math.round((L.heightMm || 0) * (L.dpi || 203) / 25.4);
-  const U = makeUpright(elements, heightDots);
+  // Most templates are designed sideways and turned upright to print top-down.
+  // A tab can opt out (upright:false) to print exactly as MES designed it — e.g.
+  // the Work Order (P3) label, which is meant to come off the printer vertically.
+  const U = opts.upright === false ? null : makeUpright(elements, heightDots);
 
   // Turned upright, the design's long edge becomes the print width, so SIZE
   // swaps to match the space the elements are now laid out in.

@@ -4,20 +4,24 @@
     "name": "P1 FG Sticker (QC)",
     "templateId": "12",
     "variant": "qc",
-    "barcodeNudge": 16
+    "barcodeNudge": 16,
+    "models": []
   },
   {
     "id": "fg-sticker-plain",
     "name": "P1 FG Sticker (Plain)",
     "templateId": "11",
     "variant": "plain",
-    "barcodeNudge": 72
+    "barcodeNudge": 72,
+    "models": []
   },
   {
     "id": "work-order-p3",
     "name": "Work Order (P3)",
     "templateId": "13",
     "variant": "plain",
-    "barcodeNudge": 0
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": ["K2VG"]
   }
 ]

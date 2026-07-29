@@ -81,6 +81,26 @@ async function getOne(jtcNo) {
   return result.recordset[0] || null;
 }
 
+// Jobs completed strictly after `since` (a JS Date), oldest-first — the auto-print
+// watcher's poll. Bound @since with the driver's DateTime2 so the compare matches
+// the datetime column; the Date round-trips the same instant the watcher stored.
+async function getCompletedSince(since) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('since', pool._mssql.DateTime2, since)
+    .query(sql.getCompletedSince);
+  return result.recordset;
+}
+
+// Newest existing completion (a Date, or null on an empty table) — used once to
+// seed the watcher's watermark so it ignores history.
+async function getLatestCompletionMark() {
+  const pool = await getPool();
+  const result = await pool.request().query(sql.latestCompletion);
+  return result.recordset[0]?.m || null;
+}
+
 async function close() {
   if (poolPromise) {
     const pool = await poolPromise;
@@ -89,4 +109,4 @@ async function close() {
   }
 }
 
-module.exports = { search, getOne, close };
+module.exports = { search, getOne, getCompletedSince, getLatestCompletionMark, close };

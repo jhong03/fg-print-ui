@@ -180,7 +180,7 @@ async function dispatch(job, loc) {
     const record = await db.getOne(job.jtcNo);
     if (!record) return { verdict: 'skip', error: 'JTC not found' };
     const template = await getTemplate(loc.templateId);
-    tspl = renderTspl(template, mapRecordToFields(record), { variant: loc.variant, barcodeNudge: loc.barcodeNudge });
+    tspl = renderTspl(template, mapRecordToFields(record), { variant: loc.variant, barcodeNudge: loc.barcodeNudge, upright: loc.upright });
   } catch (err) {
     return { verdict: 'skip', error: 'Render failed: ' + err.message };
   }
