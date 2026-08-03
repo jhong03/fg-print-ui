@@ -80,20 +80,23 @@ html, body {
 }
 .queue__head {
   display: flex;
+  flex-wrap: wrap;              /* controls drop below on narrow widths, not overflow */
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
 }
 .queue__title { font-weight: 600; }
 .queue__state { font-size: 14px; color: var(--ink-soft); }
-/* Auto-print watcher badge — quiet by default, red only when the poll errored. */
+/* Auto-print watcher badge — on its OWN line below the header, so it never fights
+   the buttons for space. Quiet by default, red only when the poll errored. */
 .queue__auto {
+  display: inline-block;
+  margin-top: 10px;
   font-size: 12.5px;
   color: var(--accent);
   padding: 2px 8px;
   border: 1px solid var(--accent-soft);
   border-radius: 999px;
   background: var(--accent-soft);
-  white-space: nowrap;
 }
 .queue__auto--err {
   color: var(--danger);
@@ -102,8 +105,10 @@ html, body {
 }
 .queue__state--busy { color: var(--accent); }
 .queue__state--paused { color: var(--danger); font-weight: 600; }
-.queue__controls { margin-left: auto; display: flex; gap: 8px; }
-.btn--sm { padding: 6px 12px; font-size: 14px; }
+.queue__controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+/* Two classes so this beats the later, single-class `.btn` on source order —
+   otherwise the small queue buttons render full-size and overflow the header. */
+.btn.btn--sm { padding: 6px 12px; font-size: 14px; }
 .queue__banner {
   margin: 12px 0 0;
   padding: 10px 12px;
@@ -115,9 +120,9 @@ html, body {
 .queue__list { list-style: none; margin: 12px 0 0; padding: 0; }
 .q-item {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;     /* top-align so the provenance line + wrapped status line up */
   gap: 10px;
-  padding: 7px 0;
+  padding: 8px 0;
   border-top: 1px solid var(--line);
   font-size: 14px;
 }
@@ -127,13 +132,22 @@ html, body {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
-.q-jtc { font-family: var(--mono); font-weight: 700; }
+.q-jtcwrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.q-jtc { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+/* Provenance: which JTC this print was derived from (Welding -> Painting). */
+.q-source {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
 .q-type {
   color: var(--ink-soft);
   font-size: 13px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
-.q-status { margin-left: auto; color: var(--ink-soft); text-align: right; }
+.q-status { color: var(--ink-soft); text-align: right; flex-shrink: 0; max-width: 40%; }
 .q-printing .q-status { color: var(--accent); }
 /* Anything with a problem (errored, or held/not-printed) stands out red so an
    operator never mistakes it for done. Normal "Waiting" stays neutral. */
@@ -282,6 +296,18 @@ html, body {
   background: #fff;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
+}
+
+/* Provenance note under the preview when a label was resolved from another JTC
+   (Welding Leak-Test -> its Painting parent). */
+.previewnote {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
 }
 
 /* ---- Actions ---- */

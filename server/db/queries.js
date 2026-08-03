@@ -53,6 +53,7 @@ module.exports = {
     // revision when the job has none (fr OUTER APPLY).
     const COLS = `
         j.Id              AS jobId,
+        j.ParentJob       AS parentJobId,
         j.ActualEndDate   AS actualEnd,
         j.OrderNumber     AS jtcNo,
         c.Name            AS customer,
@@ -123,9 +124,15 @@ module.exports = {
       // Auto-print watcher: every job that COMPLETED (ActualEndDate set) strictly
       // after the caller's watermark, oldest-first so the watermark advances
       // monotonically. TOP 200 bounds one poll; a backlog drains over ticks.
+      //
+      // parentJtcNo = the OrderNumber of this job's ParentJob. For a Welding Line
+      // JTC (Leak Test, processCode L-T/LKT) that parent is its Painting Line JTC
+      // — the label we actually print in the welding->painting flow (autoPrint.js).
       getCompletedSince: `
-        SELECT TOP 200 ${COLS}
+        SELECT TOP 200 ${COLS},
+          parent.OrderNumber AS parentJtcNo
         ${FROM}
+        LEFT JOIN dbo.Job parent ON parent.Id = j.ParentJob
         WHERE j.ActualEndDate IS NOT NULL
           AND j.ActualEndDate > @since
         ORDER BY j.ActualEndDate ASC, j.Id ASC

@@ -30,33 +30,35 @@ function mapRecordToFields(r) {
     : '';
 
   return {
-    coNumber: jtcNo,
-    // "W/O No" is the JTC No on these labels. Postgres still supplies a real
-    // woNo (jtc_WO); SQL Server has none, so it falls back to the JTC No.
-    woNumber: r.woNo,
-    partName: r.partName || '',
+    // JTC No lives on `woNumber` — its true catalog meaning ("Work order no.").
+    // Both P1's "JTC No" and P3's "W.O. NO." bind woNumber.
+    // ⚠ P3 (template 13) must be rebound coNumber -> woNumber for this, otherwise
+    //   its "W.O. NO." would show the C/O No instead of the JTC No.
+    woNumber: jtcNo,
+    // C/O number = CustomerOrder.OrderNumber — its true catalog meaning.
+    coNumber: r.coNo || '',
+    // The part NAME / description. P1's "Part Name" and P3's "PART NAME" both
+    // bind this key.
+    partName: r.partNo || '',
     dateIssue: formatDate(r.date),
     qty: r.qty != null ? String(r.qty) : '',
     jtc_barcodeId: barcode,
-
-    // Present in our data but not bound by the P1 FG template (kept for other
-    // templates / future use).
     customer: r.customer || '',
-    partNo: r.partNo || '',
     model: r.model || '',
-    // Value side wired to the query (co.OrderNumber AS coNo). Only the LEFT key
-    // ("customerOrder") is a placeholder — rename it to the real MES field key
-    // once that's created, then bind the "C/O No" element to it in the designer.
-    customerOrder: r.coNo || '',
 
-    // Work Order label fields (SQL Server; empty on data sources that omit them).
+    // The catalog has NO dedicated "Part No" key, so feed the part number into a
+    // free "Components" slot; bind P1's "Part No" element to remarksLine1. Nothing
+    // else binds remarksLine1 (P3 uses remarksLine3/4), so P3 is unaffected.
+    remarksLine1: r.partNo || '',   // P1 "Part No" (Product.PartNumber)
+
+    // Work Order (P3) label fields.
     stockCode: r.stockCode || '',
     processCode: r.processCode || '',
     empNo: r.empNo || '',
 
-    // Not sourced yet — emitted empty.
+    // Not sourced / unused by any current template.
     binId: '', lotNumber: '',
-    remarksLine1: '', remarksLine2: '', remarksLine3: '', remarksLine4: '',
+    remarksLine2: '', remarksLine3: '', remarksLine4: '',
     weightLine1: '', weightLine2: '', weightLine3: '', weightLine4: '',
   };
 }

@@ -11,6 +11,7 @@ const printBtn = document.getElementById('printBtn');
 const previewBtn = document.getElementById('previewBtn');
 const clearBtn = document.getElementById('clearBtn');
 const labelMount = document.getElementById('labelMount');
+const previewNote = document.getElementById('previewNote');
 const tsplPanel = document.getElementById('tsplPanel');
 const tsplView = document.getElementById('tsplView');
 const tsplCopy = document.getElementById('tsplCopy');
@@ -275,7 +276,7 @@ async function selectJtc(jtcNo) {
   }
 }
 
-function renderLabel(r) {
+async function renderLabel(r) {
   currentJtc = r.jtcNo || null;
   hideTspl();
   emptyState.hidden = true;
@@ -283,7 +284,21 @@ function renderLabel(r) {
   actions.hidden = false;
   // Draw the preview from the live template model so it matches the printed
   // label's geometry (positions + dimensions) for the selected destination.
-  renderLabelPreview(currentJtc, labelMount, currentLocation);
+  const model = await renderLabelPreview(currentJtc, labelMount, currentLocation);
+  showProvenance(model);
+}
+
+// When the shown label was resolved from another JTC (Welding Leak-Test -> its
+// Painting parent), tell the operator what they're actually looking at + printing.
+function showProvenance(model) {
+  if (model?.sourceJtc) {
+    previewNote.hidden = false;
+    previewNote.textContent =
+      'Showing Painting Line label ' + (model.printJtc || '') + ' — from Welding JTC ' + model.sourceJtc;
+  } else {
+    previewNote.hidden = true;
+    previewNote.textContent = '';
+  }
 }
 
 function showEmpty() {
@@ -291,6 +306,7 @@ function showEmpty() {
   label.hidden = true;
   actions.hidden = true;
   emptyState.hidden = false;
+  showProvenance(null);
 }
 
 function formatDate(v) {
@@ -333,9 +349,12 @@ async function enqueuePrint(jtcNo, { fromScan } = {}) {
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.success) throw new Error(body.error || 'Could not queue');
     const verb = fromScan ? 'Scanned & queued' : 'Queued';
+    const queued = body.printJtc || jtcNo;
+    // If a Welding JTC resolved to its Painting parent, say so.
+    const from = body.sourceJtc ? ' (painting of ' + body.sourceJtc + ')' : '';
     setStatus(body.paused
-      ? verb + ' ' + jtcNo + ' — queue is paused, press Resume to print.'
-      : verb + ' ' + jtcNo + ' for printing.');
+      ? verb + ' ' + queued + from + ' — queue is paused, press Resume to print.'
+      : verb + ' ' + queued + from + ' for printing.');
     refreshQueue();
   } catch (e) {
     setStatus(e.message, true);
@@ -438,6 +457,7 @@ const autoState = document.getElementById('autoState');
 const resumeBtn = document.getElementById('resumeBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const clearQueueBtn = document.getElementById('clearQueueBtn');
+const clearAllBtn = document.getElementById('clearAllBtn');
 
 // Latest auto-print watcher status (null until first /api/auto poll). Kept here
 // so renderQueue can keep the panel visible while the station is auto-watching,
@@ -494,6 +514,8 @@ function renderQueue(q) {
   resumeBtn.hidden = !q.paused;
   pauseBtn.hidden = q.paused || !pending.length;
   clearQueueBtn.hidden = !q.jobs.some((j) => j.status === 'done' || j.status === 'error');
+  // "Clear queue" (discard the whole backlog) only when there's pending work.
+  clearAllBtn.hidden = !pending.length;
 
   queueList.innerHTML = '';
   // Pending shown in PRINT ORDER with a queue number (#1 = next out); finished
@@ -511,9 +533,19 @@ function renderQueue(q) {
     n.className = 'q-num';
     n.textContent = num ? '#' + num : '';
 
+    // JTC + optional provenance ("from <welding JTC>") stacked in one column.
+    const jtcWrap = document.createElement('div');
+    jtcWrap.className = 'q-jtcwrap';
     const jtc = document.createElement('span');
     jtc.className = 'q-jtc';
     jtc.textContent = j.jtcNo;
+    jtcWrap.appendChild(jtc);
+    if (j.sourceJtc) {
+      const src = document.createElement('span');
+      src.className = 'q-source';
+      src.textContent = '↳ from ' + j.sourceJtc;
+      jtcWrap.appendChild(src);
+    }
 
     const type = document.createElement('span');
     type.className = 'q-type';
@@ -523,7 +555,7 @@ function renderQueue(q) {
     st.className = 'q-status';
     st.textContent = j.error ? (STATUS_LABEL[j.status] + ': ' + j.error) : STATUS_LABEL[j.status];
 
-    li.append(n, jtc, type, st);
+    li.append(n, jtcWrap, type, st);
     queueList.appendChild(li);
   });
 }
@@ -539,6 +571,12 @@ async function queueAction(path) {
 resumeBtn.addEventListener('click', () => queueAction('resume'));
 pauseBtn.addEventListener('click', () => queueAction('pause'));
 clearQueueBtn.addEventListener('click', () => queueAction('clear'));
+// Destructive: drops jobs still waiting to print, so confirm first.
+clearAllBtn.addEventListener('click', () => {
+  if (confirm('Clear the entire print queue, including jobs still waiting to print? This cannot be undone.')) {
+    queueAction('clear-all');
+  }
+});
 
 // ---- Auto-print status badge ----------------------------------------------
 // Shows whether THIS station is auto-watching for completed jobs, which

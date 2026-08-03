@@ -35,6 +35,7 @@ const path = require('node:path');
 const db = require('./db');
 const locations = require('./locations');
 const printQueue = require('./printQueue');
+const { isLeakTest } = require('./paintingFlow');
 
 const STATE_FILE = path.join(__dirname, '..', 'auto-print-state.json');
 const MAX_PRINTED_IDS = 5000; // bound the dedupe set; keep the most-recent ids
@@ -94,6 +95,24 @@ function routeMap() {
   return map;
 }
 
+// For one completed row, decide the print target — { loc, printJtc } — or null
+// to skip. Normally prints the completed job itself; a welding->painting location
+// instead requires a Leak-Test completion and prints its ParentJob (Painting) JTC.
+function resolveTarget(r, map) {
+  const loc = map.get(String(r.model || '').trim().toUpperCase());
+  if (!loc) return null; // not this station's responsibility
+  if (!loc.weldingToPainting) return { loc, printJtc: r.jtcNo, sourceJtc: null };
+
+  if (!isLeakTest(r.processCode)) return null; // not a welding leak-test completion
+  const printJtc = String(r.parentJtcNo || '').trim();
+  if (!printJtc) {
+    console.warn(`[auto] LKT job ${r.jtcNo} has no Painting parent (ParentJob=${r.parentJobId ?? 'null'}) — skipped`);
+    return null;
+  }
+  // sourceJtc = the welding JTC this painting label came from (shown in the queue).
+  return { loc, printJtc, sourceJtc: r.jtcNo };
+}
+
 // ---- the poll --------------------------------------------------------------
 async function poll() {
   if (polling) return;
@@ -126,17 +145,19 @@ async function poll() {
       if (end && end > newWatermark) newWatermark = end;
 
       const jobId = r.jobId != null ? r.jobId : r.barcodeId;
-      if (jobId == null) continue;
-      if (printedIds.has(jobId)) continue;
+      if (jobId == null || printedIds.has(jobId)) continue;
 
-      const loc = map.get(String(r.model || '').trim().toUpperCase());
-      if (!loc) continue; // not this station's responsibility
+      const target = resolveTarget(r, map);
+      if (!target) continue;
 
-      printQueue.add(r.jtcNo, loc.id);
+      // Dedup on the completing (welding) Job.Id, so one welding completion => one
+      // painting print even though we enqueue a different (painting) JTC.
+      printQueue.add(target.printJtc, target.loc.id, target.sourceJtc);
       printedIds.add(jobId);
-      lastQueued = { jtcNo: r.jtcNo, model: r.model, location: loc.id };
+      lastQueued = { jtcNo: target.printJtc, sourceJtc: r.jtcNo, model: r.model, location: target.loc.id };
       changed = true;
-      console.log(`[auto] queued JTC ${r.jtcNo} (job ${jobId}, model ${r.model}) -> ${loc.id}`);
+      const via = target.printJtc !== r.jtcNo ? ` (painting of welding ${r.jtcNo})` : '';
+      console.log(`[auto] queued ${target.printJtc}${via} [job ${jobId}, model ${r.model}] -> ${target.loc.id}`);
     }
 
     if (newWatermark !== watermark) { watermark = newWatermark; changed = true; }

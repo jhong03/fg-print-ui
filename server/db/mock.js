@@ -70,6 +70,50 @@ const RECORDS = [
     empNo: 'EMP-777',
     actualEnd: null,
   },
+  // --- Welding -> Painting flow test pair (K2VG) ---------------------------
+  // Painting Line JTC = the LABEL DATA source (no -WF, no suffix, processCode PL).
+  // It is the ParentJob of the welding job below; not completed (data only).
+  {
+    jobId: 91001,
+    jtcNo: 'J2606-594E23FGM-HD (40/40)',
+    customer: 'KOIKE (M) SDN BHD (BATU KAWAN)',
+    partName: 'MUFFLER COMP, EXHAUST',
+    partNo: 'E23-0100',
+    model: 'K2VG',
+    date: '30/07/2026',
+    qty: 50,
+    uom: 'PCS',
+    coNo: '',
+    barcodeId: '91001',
+    stockCode: 'E23-0100',
+    processCode: 'PL',
+    empNo: 'EMP-500',
+    parentJobId: null,
+    parentJtcNo: null,
+    actualEnd: null,
+  },
+  // Welding Line JTC = the TRIGGER (has -WF suffix + stock code, processCode L-T).
+  // On completion the watcher follows parentJtcNo -> the Painting JTC above and
+  // prints THAT label. Flip with POST /api/dev/complete { "id": 91002 }.
+  {
+    jobId: 91002,
+    parentJobId: 91001,
+    jtcNo: 'J2606-594E23FGM-HD (40/40)  / E23-0100-WF',
+    parentJtcNo: 'J2606-594E23FGM-HD (40/40)',
+    customer: 'KOIKE (M) SDN BHD (BATU KAWAN)',
+    partName: 'MUFFLER COMP, EXHAUST (WOF)',
+    partNo: 'E23-0100-WF',
+    model: 'K2VG',
+    date: '29/07/2026',
+    qty: 50,
+    uom: 'PCS',
+    coNo: '',
+    barcodeId: '91002',
+    stockCode: 'E23-0100-WF',
+    processCode: 'L-T',
+    empNo: 'EMP-500',
+    actualEnd: null,
+  },
 ];
 
 async function search(term) {
@@ -80,8 +124,10 @@ async function search(term) {
     .map((r) => ({ jtcNo: r.jtcNo, partName: r.partName }));
 }
 
-async function getOne(jtcNo) {
-  return RECORDS.find((r) => r.jtcNo === jtcNo) || null;
+// Matches the JTC No (OrderNumber) OR the Job.Id, like the real mssql getOne —
+// so resolving a ParentJob by id (welding->painting) works here too.
+async function getOne(key) {
+  return RECORDS.find((r) => r.jtcNo === key || String(r.jobId) === String(key)) || null;
 }
 
 // Auto-print watcher support. `since` is a Date; return completions strictly

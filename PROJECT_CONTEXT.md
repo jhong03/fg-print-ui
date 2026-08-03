@@ -149,25 +149,33 @@ built by `mapRecordToFields()`. No match → blank slot.
 ## 7. The label rendering pipeline
 
 ### 7.1 Field mapping — `server/label/mapRecord.js`
-Turns the DB row into `{ MES-field-key: value }`. **Current mapping:**
-- `coNumber` ← `jtcNo` — the **JTC No** (Job.OrderNumber). *(The template's "JTC
-  No" element binds `coNumber`.)*
-- `customerOrder` ← `r.coNo` — the **C/O No** (CustomerOrder.OrderNumber).
-  ⚠ **Work in progress**: the value side is wired (query returns `coNo`), but
-  `customerOrder` is a **placeholder LEFT key** — the MES field catalog has no
-  key for it yet. To finish: create/choose the real MES key, rename the LEFT key
-  here to match, and bind the "C/O No" element to it in the designer.
-- `partName`, `dateIssue` (`dd/mm/yyyy`), `qty`, `jtc_barcodeId` (blank ⇒ barcode
-  skipped) — bound and working.
-- `customer`, `partNo`, `model` — value side wired (query returns them), but the
-  MES catalog has **no keys** for them yet → print blank until the MES adds them.
-- `stockCode`, `processCode`, `empNo` — Work Order fields (SQL Server; §8).
-- `woNumber`, `binId`, `lotNumber`, `remarksLine1-4`, `weightLine1-4` — emitted
-  empty (no live source).
+Turns the DB row into `{ MES-field-key: value }`. **Current mapping (realigned
+2026-07 so each MES key means what the catalog says it means):**
+- `woNumber` ← `jtcNo` — the **JTC No** (Job.OrderNumber). Both P1's "JTC No" and
+  P3's "W.O. NO." bind `woNumber`.
+- `coNumber` ← `r.coNo` — the **C/O No** (CustomerOrder.OrderNumber; catalog label
+  "C/O number", sample `GTN02778`). Blank on make-to-stock jobs (no customer order).
+- `partName` ← the part text. The MES catalog labels `partName` as **"Part no."**,
+  and there is **no separate key for a part *name*/description** — so on P1
+  `partName` feeds "Part No", while P3 uses the same key for "PART NAME". A single
+  value can't be both; the operator hand-maintains this LEFT key in mapRecord.
+- `remarksLine1` ← `r.partNo` — a **free "Components" slot repurposed for P1
+  "Part No"** (nothing else binds `remarksLine1`; P3 uses `remarksLine3/4`).
+- `customer` ← `r.customer`, `model` ← `r.model` — catalog keys now exist, bound.
+- `dateIssue` (`dd/mm/yyyy`, **formatted in SQL** — see §8 tz note), `qty`,
+  `jtc_barcodeId` (blank ⇒ barcode skipped) — bound and working.
+- `stockCode`, `processCode`, `empNo` — Work Order (P3) fields (SQL Server; §8).
+- `binId`, `lotNumber`, `remarksLine2-4`, `weightLine1-4` — emitted empty.
 
-> **Naming gotcha:** the field-key names don't always match their meaning,
-> because the MES designer's catalog is fixed and the templates were bound before
-> our involvement. Trust the mapRecord comments, not the key names.
+> **This scheme needs matching MES-designer bindings** (operator's task): P1 →
+> JTC No=`woNumber`, C/O No=`coNumber`, Part No=`remarksLine1`, Part Name=`partName`;
+> **P3 → rebind "W.O. NO." from `coNumber` to `woNumber`** (else P3 shows the C/O No).
+
+> **Naming gotcha:** the field-key names don't match their meaning, because the
+> MES designer's catalog is **fixed** (`GET /api/label-templates/fields`) and the
+> templates were bound before our involvement — `partName` means "Part no.",
+> `coNumber`/`woNumber` are order numbers, and there is no `partNo`/`jtcNo`/
+> `customerOrder` key. **Trust the mapRecord comments, not the key names.**
 
 ### 7.2 TSPL rendering — `server/label/render.js` → `renderTspl(template, values, opts)`
 - Header `SIZE/GAP/DIRECTION/CLS/[SET PRINTMETHOD DIRECT]/OFFSET`, then one line
@@ -272,12 +280,16 @@ Resume then drains the whole backlog in order.
 (so a power-cut restart waits for a human), **running if empty** (so the first
 scan of the day prints hands-free).
 
-**UI (queue panel):** shows `#`print-order, JTC No, the **label type** (tab name),
-and status; a red paused banner with the reason + next job; **Resume / Pause /
-Clear done**. Wording is honest: **"Sent to printer"** (not "Printed"), because
+**UI (queue panel):** shows `#`print-order, JTC No (+ a `↳ from <welding JTC>`
+provenance line when the label was resolved welding→painting, §17), the **label
+type** (tab name), and status; a red paused banner with the reason + next job;
+**Resume / Pause / Clear done / Clear queue**. `clearFinished()` ("Clear done")
+drops finished history only; `clearAll()` ("Clear queue", confirm-gated) discards
+the **whole backlog** incl. pending and un-pauses — for when the operator does not
+want to continue. Wording is honest: **"Sent to printer"** (not "Printed"), because
 media-out is invisible to Windows (see §12).
 
-**Endpoints:** `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear}`.
+**Endpoints:** `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-all}`.
 Tunable: `QUEUE_DRAIN_TIMEOUT_MS` (default 12000), `QUEUE_DRAIN_POLL_MS`.
 
 ---
@@ -298,9 +310,14 @@ printer — set an address only for a tab that drives another machine's printer)
 With no `locations.json`, a single default tab is synthesized from `.env`.
 
 Current tabs: **FG Sticker (QC)** → tpl 12, **FG Sticker (Plain)** → tpl 11,
-**Work Order (P3)** → tpl 13. `GET /api/locations` feeds the tab bar (agentUrl is
+**Work Order (P3) — K2VG** → tpl 13 (`models:["K2VG"]`), **Work Order (P3) — K0WY**
+→ tpl 16 (`models:["K0WY"]`). `GET /api/locations` feeds the tab bar (agentUrl is
 kept server-side). Every print/preview/model/status/reload call carries
 `?location=<id>` (or in the POST body); the server resolves it to the tab.
+
+Extra per-tab options added 2026-07: `upright:false` (print vertically, as MES
+designed, instead of the default upright rotation — used by the P3 tabs);
+`models:[…]` (SubProductGroup names this tab auto-prints — see §16).
 
 ---
 
@@ -315,11 +332,14 @@ kept server-side). Every print/preview/model/status/reload call carries
 | GET | `/api/label/model?no=&location=` | Geometry for the SVG preview |
 | GET | `/api/print/preview?no=&location=` | Rendered TSPL text (no printing) |
 | POST | `/api/print` `{jtcNo, location}` | **Enqueue** a print → `{queued, id}` |
-| GET | `/api/queue` | Queue snapshot `{paused, jobs[]}` |
-| POST | `/api/queue/pause` \| `/resume` \| `/remove` \| `/clear` | Queue control |
+| GET | `/api/queue` | Queue snapshot `{paused, jobs[]}` (jobs carry `sourceJtc`) |
+| POST | `/api/queue/pause` \| `/resume` \| `/remove` \| `/clear` \| `/clear-all` | Queue control (`clear`=finished only, `clear-all`=whole backlog) |
 | GET | `/api/print/status/:jobId?location=` | Agent job status (passthrough) |
 | GET | `/api/printer/status?location=` | Agent/printer health (passthrough) |
 | POST | `/api/template/reload` `{location}` | Force-refetch that tab's MES template |
+| GET | `/api/auto` | Auto-print watcher status (badge + diagnostics) |
+| POST | `/api/auto/test` `{jtcNo, location?}` | Route+enqueue a **real** JTC, no DB write (safe test) |
+| POST | `/api/dev/complete` \| `/reset` `{jtcNo\|id}` | Flip a **mock** job's ActualEndDate (mock-only, 403 otherwise) |
 
 ---
 
@@ -406,3 +426,144 @@ npm start           # -> http://localhost:3000
 - **Calibrate print:** per-tab `barcodeNudge` in `locations.json` (live).
 - **New element type:** add a case in `render.js` `renderElement` **and**
   `model.js`/`labelPreview.js` `drawElement`.
+
+---
+
+## 16. Auto-print watcher — `server/autoPrint.js` (SHIPPED)
+
+Replaces scanning for normal flow: the server **polls the DB for jobs that just
+completed** and auto-enqueues their labels, hands-free. Manual lookup stays as a
+reprint/fallback. Runs **server-side** — no browser needed (see §18).
+
+- **Trigger = `Job.ActualEndDate` NULL → set.** Detected as an **edge, not a
+  level**: a persisted **watermark** (newest `ActualEndDate` acted past) means only
+  *new* completions fire; a persisted **printed-set** of `Job.Id`s guarantees one
+  label per job even across restarts/row-edits. State in `auto-print-state.json`
+  (gitignored). **First run seeds the watermark from the DB's newest completion**
+  → history is ignored. **Downtime = catch-up** (persisted watermark resumes);
+  delete the state file to re-seed at "now" and skip a backlog.
+- **Routing = model → location.** A completed job's `model` (SubProductGroup.Name)
+  matches a location's `models:[…]` list. **This station only prints locations
+  named in `.env` `AUTO_PRINT_LOCATIONS`**, so no two stations double-print.
+- **Config (`.env`, per-station):** `AUTO_PRINT_ENABLED` (default false),
+  `AUTO_PRINT_LOCATIONS` (comma list of tab ids this station serves),
+  `AUTO_PRINT_POLL_MS` (default 15000).
+- **DB:** `queries.js` `getCompletedSince(since)` (rows completed after the
+  watermark, oldest-first) + `getLatestCompletionMark()` (seed). Both on
+  mssql/postgres/mock adapters.
+- **Enqueues through the existing print queue** (§9), inheriting all its
+  resilience. Timezone-safe (watermark round-trips as the DB's own value).
+- **UI:** green **Auto-print: watching … · checked hh:mm:ss** badge in the queue
+  panel (red on poll error). `GET /api/auto` = status.
+- **Test endpoints:** `POST /api/auto/test {jtcNo, location?}` routes+enqueues a
+  **real** JTC with no DB write (safe against prod). `POST /api/dev/{complete|reset}`
+  flips a **mock** job's `ActualEndDate` to exercise the full detect loop —
+  **hard-guarded to `DB_CLIENT=mock`** (403 otherwise).
+
+---
+
+## 17. Welding → Painting WO auto-print (BUILT — phase 1)
+
+When a **Welding Line JTC** finishes its Leak Test, the K2VG station **auto-prints**
+(and manual/scan lookups **preview + print**) the **Painting Line JTC's** Work Order
+label — a *different, linked* job that then rides the WIP trolley into the painting
+line (ShotBlast → Painting). This **replaces** printing the welding job's own label.
+
+**The two jobs** (verified against real rows 33721↔33015, 33722↔33016; both share `MOId`):
+| | Welding JTC | Painting JTC |
+|---|---|---|
+| OrderNumber | has ` / <partNo>` suffix (`…(40/40)  / E23-0100-WF`) | no suffix (`…(40/40)`) |
+| Stock code | has `-WF` (`E23-0100-WF`) | no `-WF` (`E23-0100`) |
+| ProcessCode | **`L-T` or `LKT`** (Leak Test) | **`PL`** (Painting, ProcessCodeId 38) |
+| `ParentJob` | → the **Painting** job's `Id` | null |
+
+**Trigger / resolution (implemented):**
+1. A job completes (`ActualEndDate` set — §16's watermark), **or** an operator
+   enters/scans a JTC on a `weldingToPainting` tab.
+2. Filter: `processCode` ∈ {`L-T`, `LKT`} (both mean **Leak Test**; `L-T` is
+   actually the more common — match **both**) **and** the tab is `weldingToPainting`.
+   ⚠ **`ParentJob`-presence is NOT the filter** — it's a general job hierarchy;
+   cutting/bending/welding sub-jobs all have parents. Leak-Test processCode is the
+   decision; `ParentJob` is used only for the *lookup*.
+3. Follow the welding job's **`ParentJob`** → the Painting job.
+4. Print/preview the **Painting JTC's** WO label (template 13 / `work-order-p3-k2vg`),
+   data from the Painting `Job` record.
+5. **Dedup (auto) by the welding `Job.Id`.**
+
+**Provenance everywhere:** the preview shows a note *"Showing Painting Line label …
+— from Welding JTC …"*, and the print queue shows *"↳ from &lt;welding JTC&gt;"* under
+the job — for manual, scan, and auto paths alike. Entering the Painting JTC
+directly (or any non-Leak-Test job) shows it as-is with no provenance.
+
+**Code (as built):**
+- `server/paintingFlow.js` (new): `isLeakTest()` (token-matches L-T/LKT) +
+  `resolvePainting(record, loc, db)` → `{ record, sourceJtc }` (follows `ParentJob`
+  via `getOne`, which resolves by `Job.Id`).
+- `queries.js`: `parentJobId` in the shared `COLS`; `parentJtcNo` (self-join on
+  `ParentJob`) in `getCompletedSince`.
+- `locations.js` / `locations.json`: per-tab **`weldingToPainting:true`** (set only
+  on `work-order-p3-k2vg`). Other tabs print the entered/completed job directly.
+- `autoPrint.js`: `resolveTarget()` uses `isLeakTest` + `parentJtcNo`; passes the
+  welding JTC as `sourceJtc` to the queue.
+- `index.js`: `/api/label/model`, `/api/print/preview`, `/api/print` all resolve
+  welding→painting; the model + print responses carry `sourceJtc` / `printJtc`.
+- `printQueue.js`: `add(jtcNo, location, sourceJtc)` stores it; `list()` exposes it.
+- Front-end: `labelPreview.js` returns the model; `app.js` shows the preview note +
+  the queue "↳ from …" line; queue header/rows re-aligned (badge on its own line,
+  controls wrap, rows top-align) so long JTCs + all buttons lay out cleanly.
+
+**⚠ Process Code shows `PL` — NEXT DISCUSSION (make it `SB`?):** the painting job's
+flow is a single `PL` step (ProcessCodeId 38). `SB`/ShotBlast (ProcessCodeId 46) is
+the painting line's first *physical* station — **not in the painting job's flow** and
+downstream of the print. To make the label's Process Code read `SB` it must be
+**hardcoded** for this path (a per-location or mapRecord override); that's the next
+thing to design.
+
+### Phase 2 — QR binding + confirm-before-print (DEFERRED, blocked on QR logic)
+- QR codes = **reusable engraved aluminium tags** (green=Start, red=End). We do
+  **NOT** print them (thermal is monochrome; tags are physical/permanent/reusable).
+- The **"Painting Line JTC Assign" module = us.** Operator provides/scans the
+  green + red tag → we **record the binding** `{paintingJtc ↔ greenToken, redToken}`,
+  **display both QRs in the UI** to verify, confirm all three (WO data + 2 tags) →
+  **only then release the WO print** ("ONLY PRINT when all three confirmed").
+- Painting line: green tag on 1st muffler (Start), red on 50th (End); CAMs scan a
+  tag → resolve token→JTC via the binding → set Painting JTC `ActualStartDate`
+  (1st CAM) / `ActualEndDate` (3rd CAM).
+- **Open questions (user consulting others before build):** where the
+  `{tag→JTC}` binding lives + how painting CAMs resolve it (existing MES table/API
+  vs a table we own); how the operator hands us a tag (scan vs assign); the tag
+  source/pool; the **re-bind lifecycle** (reusable, latest-wins, need enough tags
+  that none is rebound while still riding a trolley); the exact "confirmed" gesture.
+- Phase 1 prints the WO immediately with **no** gate; the gate is phase-2 only.
+
+---
+
+## 18. LeakTest embed in `BKY_eJTC` (SHIPPED)
+
+`BKY_eJTC` (a **separate** repo at `C:\Users\User\Downloads\BKY_eJTC` — React +
+Vite + MUI SPA, `ejtc-reactjs`, served over **HTTP** at e.g.
+`http://43.217.35.209/leaktest?…`) embeds this app:
+- `src/components/FgPrintButton.jsx` — a green **FG Print** button → MUI `<Dialog>`
+  with `<iframe src="http://localhost:3000">` (the live fg-print-ui). Iframe is
+  **mounted only while open** ("fresh each open"). URL override:
+  `VITE_FG_PRINT_URL` (default `http://localhost:3000`).
+- Wired into `src/pages/LeakTestPage.jsx` (import + one `<FgPrintButton/>` beside
+  the "Downtime" button).
+- **Works because** `localhost` resolves in the *operator's browser* (the print
+  terminal), and both apps are HTTP → no mixed-content block. fg-print-ui runs as
+  its **own process** on that terminal. **Closing the dialog stops only the
+  frontend redraw** — the server-side auto-print watcher + queue keep running.
+
+---
+
+## 19. Other fixes (2026-07)
+
+- **Date timezone bug fixed.** `dateIssue` is now formatted in SQL
+  (`CONVERT(varchar(10), j.CreateDate, 103)` = `dd/mm/yyyy`) so a tz-less
+  `datetime` can't be shifted a day by the driver reading it as UTC + local
+  render. Was printing `25/06` for a `24/06 16:33` CreateDate.
+- **`.btn.btn--sm` specificity fix** — the small queue buttons (Resume/Pause/Clear)
+  were rendering full-size because a later single-class `.btn` won on source order.
+- **Data note (not a bug):** `model` and `C/O No` are **not** mutually exclusive
+  (2204 jobs have both); blank C/O = make-to-stock jobs with no `CustomerOrder`;
+  the `CustomerOrderItem→CustomerOrder` join is clean (0 orphans).

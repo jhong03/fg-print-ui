@@ -76,6 +76,11 @@ function resolveEntry(entry, d) {
   const models = Array.isArray(entry.models)
     ? entry.models.map((m) => String(m).trim().toUpperCase()).filter(Boolean)
     : [];
+  // Welding->Painting flow: when true, an auto-print match on this location does
+  // NOT print the completed (welding) job. Instead it must be a Leak-Test job
+  // (processCode L-T/LKT); the watcher follows its ParentJob to the Painting JTC
+  // and prints THAT. See autoPrint.js and PROJECT_CONTEXT.md §17.
+  const weldingToPainting = entry.weldingToPainting === true;
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
@@ -86,6 +91,7 @@ function resolveEntry(entry, d) {
     barcodeNudge: nudge,
     upright,
     models,
+    weldingToPainting,
   };
 }
 

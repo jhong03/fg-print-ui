@@ -8,22 +8,27 @@ are held/retried), and the **reload-template mechanism**.
 ## 1. Simple operator instructions
 
 1. **Open** the app: `http://localhost:3000`
-2. **Pick the destination tab** (e.g. *P1 FG Sticker (QC)*, *(Plain)*, *Work Order
-   (P3)*). Your choice is remembered on this terminal.
+2. **Pick the destination tab** — *P1 FG Sticker (QC)*, *(Plain)*, *Work Order (P3)
+   – K2VG*, *Work Order (P3) – K0WY*. Your choice is remembered on this terminal.
 3. **Pick the job:**
    - **Scan** the JTC barcode (or paste it) → it loads **and queues to print
      automatically**, hands-free.
    - **Type** it → matches appear; press Enter / tap one to load, then click
      **Print label** to queue it.
-4. **Watch the Print queue** at the bottom: each job shows its `#`order, JTC No,
-   label type, and status. **"Sent to printer"** = handed to the printer —
-   confirm the label physically came out.
+   - On the **K2VG Work Order** tab, entering/scanning a **Welding Line (Leak-Test)
+     JTC** shows and prints its **Painting Line** label (its next process). A note
+     under the preview says *"Showing Painting Line label … — from Welding JTC …"*.
+4. **Watch the Print queue** at the bottom: each job shows its `#`order, JTC No
+   (with a `↳ from <welding JTC>` line when it came from a welding job), label type,
+   and status. **"Sent to printer"** = handed to the printer — confirm the label
+   physically came out.
 5. If the queue says **Paused** (printer offline / not ready): fix the printer
-   (reload labels/ribbon, power on), then click **Resume**. Queued jobs print in
-   order.
+   (reload labels/ribbon, power on), then click **Resume**. Or **Clear queue** to
+   discard the backlog if you don't want to continue it.
 
 *Optional:* **Preview TSPL** shows the exact printer code. **Reload template**
-pulls the latest design from MES (see §4). **Clear** resets the input.
+pulls the latest design from MES (see §4). **Clear done** removes finished history;
+**Clear queue** discards everything (confirm-gated). **Clear** resets the input.
 
 ---
 
@@ -50,11 +55,17 @@ TSPL text.
 | SQL Server (job data) | `10.0.100.14\SQLEXPRESS` | (instance) |
 | TSC TE244 | USB share `TSC_TE244` on the terminal | — |
 
-**Field mapping** (record → MES field key): `jtcNo→coNumber` (JTC No),
-`coNo→customerOrder` (C/O No — *placeholder key, pending MES field + binding*),
-`partName→partName`, `date→dateIssue`, `qty→qty`, `barcodeId(Job.Id)→jtc_barcodeId`.
-`customer/partNo/model` are fetched but print blank until the MES adds bindable
-keys. `stockCode/processCode/empNo` are for the Work Order template.
+**Field mapping** (record → MES field key): `jtcNo→woNumber` (JTC No),
+`coNo→coNumber` (C/O No), `partName→partName`, `partNo→remarksLine1` (Part No — no
+native key, uses a free slot), `date→dateIssue` (formatted in SQL, tz-safe),
+`qty→qty`, `customer→customer`, `model→model`, `barcodeId(Job.Id)→jtc_barcodeId`.
+`stockCode/processCode/empNo` are for the Work Order template. See PROJECT_CONTEXT
+§7.1 for the naming gotchas + the matching MES-designer bindings.
+
+**Welding → Painting (K2VG tab):** entering/scanning/completing a Welding Leak-Test
+JTC (`processCode` `L-T`/`LKT`) resolves via `Job.ParentJob` to its **Painting** JTC
+and previews/prints THAT label; the welding JTC rides along as provenance. See
+PROJECT_CONTEXT §17. (Next task: make the label's Process Code read `SB`.)
 
 ---
 
@@ -74,11 +85,14 @@ Prints go through a **persistent queue** (`server/printQueue.js`, saved to
   there's a backlog** (waits for a human), or running if empty.
 - **Data errors** (unknown JTC) mark that one job `error` and are skipped — they
   don't pause the line.
+- **Discard the backlog:** **Clear queue** (confirm-gated) drops all pending +
+  finished jobs and un-pauses — for when you don't want to continue. **Clear done**
+  removes finished history only.
 - **Limitation:** out-of-labels mid-print is invisible to Windows, so the queue
   can't auto-detect it — it shows "Sent to printer"; the operator watches the
   printer (which also reprints held jobs on feed after reloading).
 
-Endpoints: `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear}`.
+Endpoints: `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-all}`.
 
 ---
 

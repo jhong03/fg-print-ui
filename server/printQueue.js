@@ -97,6 +97,7 @@ function list() {
     jobs: jobs.map((j) => ({
       id: j.id,
       jtcNo: j.jtcNo,
+      sourceJtc: j.sourceJtc || null,
       location: j.location,
       status: j.status,
       error: j.error || null,
@@ -105,10 +106,13 @@ function list() {
 }
 
 // ---- queue operations -----------------------------------------------------
-function add(jtcNo, location) {
+function add(jtcNo, location, sourceJtc) {
   const job = {
     id: ++seq,
     jtcNo: String(jtcNo || '').trim(),
+    // The JTC this print was DERIVED from (e.g. the Welding JTC when jtcNo is its
+    // Painting parent). Shown as provenance in the queue; null for direct prints.
+    sourceJtc: sourceJtc ? String(sourceJtc).trim() : null,
     location: location || null,
     status: 'queued',
     error: null,
@@ -139,6 +143,16 @@ function remove(id) {
 // Clear finished history (leaves pending work untouched).
 function clearFinished() {
   jobs = jobs.filter((j) => j.status === 'queued' || j.status === 'printing');
+  persist();
+}
+
+// Discard the WHOLE queue — pending, printing, and finished — and return to a
+// clean, un-paused state. For when the operator does NOT want to continue the
+// held backlog. Note: a label already handed to the Windows spooler isn't recalled
+// here (on a paused queue the spooler was already cleared, so this is clean).
+function clearAll() {
+  jobs = [];
+  paused = false;
   persist();
 }
 
@@ -316,4 +330,4 @@ function kick() {
 
 load();
 
-module.exports = { add, list, pause, resume, remove, clearFinished };
+module.exports = { add, list, pause, resume, remove, clearFinished, clearAll };

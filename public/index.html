@@ -39,6 +39,7 @@
 
       <div class="label" id="label" hidden>
         <div id="labelMount" class="labelmount"></div>
+        <p id="previewNote" class="previewnote" hidden></p>
       </div>
 
       <div class="actions" id="actions" hidden>
@@ -61,13 +62,14 @@
       <div class="queue__head">
         <span class="queue__title">Print queue</span>
         <span id="queueState" class="queue__state"></span>
-        <span id="autoState" class="queue__auto" hidden></span>
         <div class="queue__controls">
           <button id="resumeBtn" class="btn btn--sm" type="button" hidden>Resume</button>
           <button id="pauseBtn" class="btn btn--sm btn--ghost" type="button" hidden>Pause</button>
           <button id="clearQueueBtn" class="btn btn--sm btn--ghost" type="button" hidden>Clear done</button>
+          <button id="clearAllBtn" class="btn btn--sm btn--ghost" type="button" hidden>Clear queue</button>
         </div>
       </div>
+      <span id="autoState" class="queue__auto" hidden></span>
       <p id="queueBanner" class="queue__banner" hidden></p>
       <ul id="queueList" class="queue__list"></ul>
       <p class="queue__note">"Sent to printer" means the label was handed to the printer — confirm it physically came out (the printer can't report out-of-labels).</p>

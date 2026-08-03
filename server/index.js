@@ -11,6 +11,7 @@ const agent = require('./agent');
 const locations = require('./locations');
 const printQueue = require('./printQueue');
 const autoPrint = require('./autoPrint');
+const { resolvePainting } = require('./paintingFlow');
 
 const app = express();
 app.use(express.json());
@@ -102,8 +103,11 @@ app.get('/api/print/preview', async (req, res) => {
     const record = await db.getOne(no);
     if (!record) return res.status(404).json({ error: 'JTC not found' });
     const loc = resolveLocation(req);
+    // Welding->Painting: a Leak-Test JTC on a weldingToPainting tab previews/prints
+    // its Painting parent's label (see paintingFlow.js).
+    const { record: target } = await resolvePainting(record, loc, db);
     const template = await getTemplate(loc.templateId);
-    const tspl = renderTspl(template, mapRecordToFields(record), printOptsFor(loc));
+    const tspl = renderTspl(template, mapRecordToFields(target), printOptsFor(loc));
     res.type('text/plain').send(tspl);
   } catch (err) {
     console.error('[preview]', err.message);
@@ -120,8 +124,11 @@ app.get('/api/label/model', async (req, res) => {
     const record = await db.getOne(no);
     if (!record) return res.status(404).json({ error: 'JTC not found' });
     const loc = resolveLocation(req);
+    // Welding->Painting: preview the Painting parent's label; tell the UI where it
+    // came from so it can show "showing Painting label — from Welding JTC …".
+    const { record: target, sourceJtc } = await resolvePainting(record, loc, db);
     const template = await getTemplate(loc.templateId);
-    res.json(buildModel(template, record, printOptsFor(loc)));
+    res.json({ ...buildModel(template, target, printOptsFor(loc)), sourceJtc, printJtc: target.jtcNo });
   } catch (err) {
     console.error('[label/model]', err.message);
     res.status(500).json({ error: err.message });
@@ -130,14 +137,30 @@ app.get('/api/label/model', async (req, res) => {
 
 // Queue a JTC label for printing. POST /api/print { jtcNo, location }
 // Used by both a scan (auto-queued by the front-end) and the Print Label button.
-// The queue worker renders + sends one job at a time and confirms each print;
-// see printQueue.js. The JTC is validated at print time, not here.
-app.post('/api/print', (req, res) => {
+// On a weldingToPainting tab a Leak-Test JTC resolves to its Painting parent, so
+// we enqueue the Painting JTC and remember the welding one as `sourceJtc`. A JTC
+// we can't look up is enqueued as-is (the queue surfaces the error at dispatch).
+app.post('/api/print', async (req, res) => {
   const no = (req.body?.jtcNo || '').trim();
   if (!no) return res.status(400).json({ error: 'Missing jtcNo' });
   const loc = resolveLocation(req);
-  const r = printQueue.add(no, loc.id);
-  res.json({ success: true, queued: true, id: r.id, position: r.position, paused: r.paused });
+  let jtcToQueue = no;
+  let sourceJtc = null;
+  try {
+    const record = await db.getOne(no);
+    if (record) {
+      const t = await resolvePainting(record, loc, db);
+      jtcToQueue = t.record.jtcNo;
+      sourceJtc = t.sourceJtc;
+    }
+  } catch (err) {
+    console.error('[print] resolve failed, queuing as-is:', err.message);
+  }
+  const r = printQueue.add(jtcToQueue, loc.id, sourceJtc);
+  res.json({
+    success: true, queued: true, id: r.id, position: r.position, paused: r.paused,
+    printJtc: jtcToQueue, sourceJtc,
+  });
 });
 
 // ---- Print queue ----------------------------------------------------------
@@ -148,6 +171,7 @@ app.post('/api/queue/pause', (req, res) => { printQueue.pause(); res.json(printQ
 app.post('/api/queue/resume', (req, res) => { printQueue.resume(); res.json(printQueue.list()); });
 app.post('/api/queue/remove', (req, res) => { printQueue.remove(req.body?.id); res.json(printQueue.list()); });
 app.post('/api/queue/clear', (req, res) => { printQueue.clearFinished(); res.json(printQueue.list()); });
+app.post('/api/queue/clear-all', (req, res) => { printQueue.clearAll(); res.json(printQueue.list()); });
 
 // Auto-print watcher status (for the UI badge + diagnostics). GET /api/auto
 app.get('/api/auto', (req, res) => res.json(autoPrint.status()));

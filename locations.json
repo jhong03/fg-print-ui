@@ -16,12 +16,22 @@
     "models": []
   },
   {
-    "id": "work-order-p3",
-    "name": "Work Order (P3)",
+    "id": "work-order-p3-k2vg",
+    "name": "Work Order (P3) - K2VG",
     "templateId": "13",
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K2VG"]
+    "models": ["K2VG"],
+    "weldingToPainting": true
+  },
+  {
+    "id": "work-order-p3-k0wy",
+    "name": "Work Order (P3) - K0WY",
+    "templateId": "16",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": ["K0WY"]
   }
 ]

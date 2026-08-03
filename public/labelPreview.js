@@ -35,7 +35,7 @@
       p.className = 'labelmount__err';
       p.textContent = 'Label preview unavailable: ' + e.message;
       mount.appendChild(p);
-      return;
+      return null;
     }
 
     const { widthDots, heightDots } = model.label;
@@ -56,6 +56,8 @@
     for (const el of model.elements) drawElement(g, el);
     svg.appendChild(g);
     mount.appendChild(svg);
+    // Hand the model back so the caller can surface provenance (sourceJtc/printJtc).
+    return model;
   }
 
   function drawElement(g, el) {
