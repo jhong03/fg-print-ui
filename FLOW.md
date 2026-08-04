@@ -16,8 +16,13 @@ are held/retried), and the **reload-template mechanism**.
    - **Type** it → matches appear; press Enter / tap one to load, then click
      **Print label** to queue it.
    - On the **K2VG Work Order** tab, entering/scanning a **Welding Line (Leak-Test)
-     JTC** shows and prints its **Painting Line** label (its next process). A note
-     under the preview says *"Showing Painting Line label … — from Welding JTC …"*.
+     JTC** shows its **Painting Line** label (its next process). A note under the
+     preview says *"Showing Painting Line label … — from Welding JTC …"*.
+   - **This tab is QR-gated:** the label does **not** print yet. A task-list appears
+     (☐ **Green/Start** ☐ **Red/End**). **Scan this workcell's two engraved QR
+     tags** — only when both bind does the Work Order label go to the print queue.
+     A wrong or swapped tag is rejected on the spot; just scan the correct one. The
+     **Print label** button stays disabled until both are scanned (no bypass).
 4. **Watch the Print queue** at the bottom: each job shows its `#`order, JTC No
    (with a `↳ from <welding JTC>` line when it came from a welding job), label type,
    and status. **"Sent to printer"** = handed to the printer — confirm the label
@@ -36,6 +41,8 @@ pulls the latest design from MES (see §4). **Clear done** removes finished hist
 
 **Look up:** type/scan → `GET /api/jtc/search` (SQL Server) → select/scan →
 `GET /api/jtc?no=` → record → on-screen SVG preview (`/api/label/model`).
+Suggestions are **filtered to the tab's `models`** (a workcell only sees its own
+model's JTCs; tabs with no `models` list show everything).
 
 **Print:** `POST /api/print {jtcNo, location}` **enqueues**. The queue worker maps
 the record to MES field keys → renders TSPL → `POST :9000/print-label` to that
@@ -64,8 +71,10 @@ native key, uses a free slot), `date→dateIssue` (formatted in SQL, tz-safe),
 
 **Welding → Painting (K2VG tab):** entering/scanning/completing a Welding Leak-Test
 JTC (`processCode` `L-T`/`LKT`) resolves via `Job.ParentJob` to its **Painting** JTC
-and previews/prints THAT label; the welding JTC rides along as provenance. See
-PROJECT_CONTEXT §17. (Next task: make the label's Process Code read `SB`.)
+and previews/prints THAT label; the welding JTC rides along as provenance. The
+label's Process Code is **prepended** with `SB` (ShotBlast) via
+`locations.json` `processCodePrepend` — so K2VG shows `SB, PL` (revert by clearing
+that key). See PROJECT_CONTEXT §17.
 
 ---
 
@@ -93,6 +102,12 @@ Prints go through a **persistent queue** (`server/printQueue.js`, saved to
   printer (which also reprints held jobs on feed after reloading).
 
 Endpoints: `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-all}`.
+
+**QR binding gate (P3 Work Order tab):** on a `requireQrBinding` tab the job is held
+in a **pending-binding queue** first — `GET /api/binding`,
+`POST /api/binding/{scan|print|remove|clear}` — and only moves to the print queue
+above once both this workcell's Green (`<qrWorkcell>:START`) and Red
+(`<qrWorkcell>:END`) tags are scanned and validated. See PROJECT_CONTEXT §17 (Phase 2).
 
 ---
 

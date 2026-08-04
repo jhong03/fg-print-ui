@@ -81,6 +81,19 @@ function resolveEntry(entry, d) {
   // (processCode L-T/LKT); the watcher follows its ParentJob to the Painting JTC
   // and prints THAT. See autoPrint.js and PROJECT_CONTEXT.md §17.
   const weldingToPainting = entry.weldingToPainting === true;
+  // QR binding gate: when true, a completed/entered job on this tab does NOT print
+  // directly — it goes to the PENDING-BINDING queue and only reaches the print
+  // queue after the operator scans this workcell's Green (Start) + Red (End) QR
+  // tags. `qrWorkcell` is the token engraved into both tags; the expected scans are
+  // `<qrWorkcell>:START` and `<qrWorkcell>:END`. See bindingQueue.js + §17.
+  const requireQrBinding = entry.requireQrBinding === true;
+  const qrWorkcell = String(entry.qrWorkcell || '').trim();
+  // Welding->Painting only: a process code to PREPEND to the painting label's
+  // process code (e.g. "SB" for ShotBlast — the painting line's first physical
+  // station, which MES lumps into a single "PL" step for some models). Empty/
+  // absent = show the routing's process code exactly as MES has it. Applied only
+  // when a welding->painting resolution actually happened; see paintingFlow.js.
+  const processCodePrepend = String(entry.processCodePrepend || '').trim();
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
@@ -92,6 +105,9 @@ function resolveEntry(entry, d) {
     upright,
     models,
     weldingToPainting,
+    processCodePrepend,
+    requireQrBinding,
+    qrWorkcell,
   };
 }
 

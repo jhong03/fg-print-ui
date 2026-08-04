@@ -231,7 +231,10 @@ coNo, empNo, stockCode, processCode }`.
   barcode encodes `*j` + Job.Id); `Job.Quantity` → qty; `Job.CreateDate` → date.
 - `Job.CustomerId → Customer.Name` → customer.
 - `Job.ProductId → Product` → partName (`.Name`), partNo (`.PartNumber`);
-  `Product.SubProductGroupId → SubProductGroup.Name` → model.
+  `Product.SubProductGroupId → SubProductGroup.Code` → model. (Uses **Code**, e.g.
+  `E23` for K2VG, `E21` for K0WY — NOT the Name. ⚠ Code is a family, not unique:
+  K0WY and K0WL are both `E21`, so tabs match on Code and two models with the same
+  Code can't be told apart — keep one Code per model tab. See §16/§17.)
 - `Job.COItemId → CustomerOrderItem.CustomerOrderId → CustomerOrder.OrderNumber`
   → **coNo** (C/O No).
 - `Job.CreatedBy → [User].EmployeeNum` → empNo.
@@ -290,6 +293,7 @@ want to continue. Wording is honest: **"Sent to printer"** (not "Printed"), beca
 media-out is invisible to Windows (see §12).
 
 **Endpoints:** `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-all}`.
+QR-gated tabs stage in the pending-binding queue first (`/api/binding/*`, §17 Phase 2).
 Tunable: `QUEUE_DRAIN_TIMEOUT_MS` (default 12000), `QUEUE_DRAIN_POLL_MS`.
 
 ---
@@ -317,7 +321,7 @@ kept server-side). Every print/preview/model/status/reload call carries
 
 Extra per-tab options added 2026-07: `upright:false` (print vertically, as MES
 designed, instead of the default upright rotation — used by the P3 tabs);
-`models:[…]` (SubProductGroup names this tab auto-prints — see §16).
+`models:[…]` (SubProductGroup **Codes** this tab auto-prints, e.g. `["E23"]` — see §16).
 
 ---
 
@@ -327,13 +331,16 @@ designed, instead of the default upright rotation — used by the P3 tabs);
 |---|---|---|
 | GET | `/api/config` | `{companyName, defaultUom}` |
 | GET | `/api/locations` | Tab list `[{id,name,templateId,variant}]` |
-| GET | `/api/jtc/search?q=` | Suggestions `[{jtcNo, partName}]` |
+| GET | `/api/jtc/search?q=&location=` | Suggestions `[{jtcNo, partName}]`, filtered to the tab's `models` |
 | GET | `/api/jtc?no=` | Full record for one JTC (query param — JTC Nos contain `/`, spaces) |
 | GET | `/api/label/model?no=&location=` | Geometry for the SVG preview |
 | GET | `/api/print/preview?no=&location=` | Rendered TSPL text (no printing) |
 | POST | `/api/print` `{jtcNo, location}` | **Enqueue** a print → `{queued, id}` |
 | GET | `/api/queue` | Queue snapshot `{paused, jobs[]}` (jobs carry `sourceJtc`) |
 | POST | `/api/queue/pause` \| `/resume` \| `/remove` \| `/clear` \| `/clear-all` | Queue control (`clear`=finished only, `clear-all`=whole backlog) |
+| GET | `/api/binding?location=` | Pending-binding queue for QR-gated tabs (Phase 2, §17) |
+| POST | `/api/binding/scan` `{location, token}` | Validate one Green/Red QR scan → `{ok, role\|error}` |
+| POST | `/api/binding/print` \| `/remove` \| `/clear` | Release-if-bound (gated) \| remove one \| clear station's staged |
 | GET | `/api/print/status/:jobId?location=` | Agent job status (passthrough) |
 | GET | `/api/printer/status?location=` | Agent/printer health (passthrough) |
 | POST | `/api/template/reload` `{location}` | Force-refetch that tab's MES template |
@@ -442,7 +449,7 @@ reprint/fallback. Runs **server-side** — no browser needed (see §18).
   (gitignored). **First run seeds the watermark from the DB's newest completion**
   → history is ignored. **Downtime = catch-up** (persisted watermark resumes);
   delete the state file to re-seed at "now" and skip a backlog.
-- **Routing = model → location.** A completed job's `model` (SubProductGroup.Name)
+- **Routing = model → location.** A completed job's `model` (SubProductGroup.Code)
   matches a location's `models:[…]` list. **This station only prints locations
   named in `.env` `AUTO_PRINT_LOCATIONS`**, so no two stations double-print.
 - **Config (`.env`, per-station):** `AUTO_PRINT_ENABLED` (default false),
@@ -512,29 +519,82 @@ directly (or any non-Leak-Test job) shows it as-is with no provenance.
   the queue "↳ from …" line; queue header/rows re-aligned (badge on its own line,
   controls wrap, rows top-align) so long JTCs + all buttons lay out cleanly.
 
-**⚠ Process Code shows `PL` — NEXT DISCUSSION (make it `SB`?):** the painting job's
-flow is a single `PL` step (ProcessCodeId 38). `SB`/ShotBlast (ProcessCodeId 46) is
-the painting line's first *physical* station — **not in the painting job's flow** and
-downstream of the print. To make the label's Process Code read `SB` it must be
-**hardcoded** for this path (a per-location or mapRecord override); that's the next
-thing to design.
+**Process Code — `SB` prepend (BUILT).** A DB survey (Flow table, keyed by
+`ProductId` via `FlowRevId`) showed painting routings are **model-dependent**:
+`K2SA`/`K2SR` already carry `SB` (ProcessCodeId 46) as their painting step, while
+`K2VG`/`K1AJ`/`K2PM` model painting as a single lumped `PL` step (ProcessCodeId 38)
+with **no `SB` anywhere reachable** (not on the welding/painting product, not on any
+MO sibling, not in a current flow revision). So `SB` can't be sourced for K2VG from
+data. Decision: **prepend** a configured code to the painting label's Process Code,
+on the welding→painting path only:
+- Config: `locations.json` → `work-order-p3-k2vg` → `"processCodePrepend": "SB"`.
+- Behaviour: `PL → "SB, PL"`; `SB → "SB"` (no double-up); `"" → "SB"`.
+- Applied in **one** helper, `paintingFlow.prependProcessCode(record, loc)`, called
+  from `resolvePainting` (preview/model/manual) **and** the queue worker's
+  `dispatch` (actual print, gated on `job.sourceJtc` so a directly-printed painting
+  JTC is untouched).
+- **Revert to MES as-is:** set `processCodePrepend` to `""` or delete the key —
+  no code change, no restart (locations.json is read live). The label then shows the
+  routing's process code verbatim (`PL` for K2VG, `SB` for K2SA/K2SR).
 
-### Phase 2 — QR binding + confirm-before-print (DEFERRED, blocked on QR logic)
-- QR codes = **reusable engraved aluminium tags** (green=Start, red=End). We do
-  **NOT** print them (thermal is monochrome; tags are physical/permanent/reusable).
-- The **"Painting Line JTC Assign" module = us.** Operator provides/scans the
-  green + red tag → we **record the binding** `{paintingJtc ↔ greenToken, redToken}`,
-  **display both QRs in the UI** to verify, confirm all three (WO data + 2 tags) →
-  **only then release the WO print** ("ONLY PRINT when all three confirmed").
-- Painting line: green tag on 1st muffler (Start), red on 50th (End); CAMs scan a
-  tag → resolve token→JTC via the binding → set Painting JTC `ActualStartDate`
-  (1st CAM) / `ActualEndDate` (3rd CAM).
-- **Open questions (user consulting others before build):** where the
-  `{tag→JTC}` binding lives + how painting CAMs resolve it (existing MES table/API
-  vs a table we own); how the operator hands us a tag (scan vs assign); the tag
-  source/pool; the **re-bind lifecycle** (reusable, latest-wins, need enough tags
-  that none is rebound while still riding a trolley); the exact "confirmed" gesture.
-- Phase 1 prints the WO immediately with **no** gate; the gate is phase-2 only.
+### Phase 2 — QR binding gate (BUILT — 2026-08)
+
+A **local compliance gate**, no MES/camera integration. The AI cameras detect
+physical start/end on their own (green tag @ 1st camera = start, red @ 3rd = end);
+we only force the operator to physically scan both tags before we release OUR label.
+
+- **QR tags** = one reusable engraved aluminium set (Green=Start, Red=End) **per
+  workcell**. We do **NOT** generate/print them. Each is engraved (via the CAD laser
+  app) with `<qrWorkcell>:START` / `<qrWorkcell>:END`, e.g. `K2VG-CELL:START`.
+- **Config:** `locations.json` gains `requireQrBinding: true` + `qrWorkcell:"K2VG-CELL"`
+  on the gated tab. Only those tabs gate; all others print as before.
+- **Flow:** welding job done (or manual JTC scan) → resolve to Painting JTC → the job
+  is **STAGED** in a pending-binding queue (NOT the print queue) → the UI shows a
+  task-list (☐ Green ☐ Red) with the Painting preview → operator scans both tags →
+  each is **validated server-side** against `<qrWorkcell>:START/:END`
+  (case-insensitive, trimmed) → on both bound, the label is released to the **print
+  queue** (all existing pause/resume/spooler-drain mechanics unchanged) → physical
+  print. **Interlock:** a wrong-workcell tag or swapped colour fails the exact match
+  and is rejected inline (**no lockout** — just rescan the right one).
+- **Print Label button** is **gated** (disabled until both tags bind; label switches
+  to "Reprint" after) — **no bypass**. Auto-release fires once on full bind; the
+  button is the manual equivalent / reprint.
+- **Selectable list, single preview.** Multiple jobs can be staged (auto triggers +
+  manual entries queue up). The list is **clickable** — the SELECTED row drives the
+  one-and-only preview AND is the target of the next Green/Red scan + the Print
+  release (`/api/binding/{scan,print}` take an optional `id`, default = front item).
+  Entering/staging a JTC auto-selects it. This replaced an earlier double-preview bug
+  where a manual render and the binding render fought over the stage.
+- **Persisted** (`binding-jobs.json`, gitignored) so a restart never drops a staged
+  job; the scan flags themselves are transient.
+- **Clear** does NOT clear the binding queue — it only resets the JTC field + preview
+  (on a QR tab it just **deselects**: blank preview, rows stay). Remove staged jobs
+  individually with the **✕** on each row. A newly staged/entered job re-surfaces the
+  preview even after a Clear (auto-selected).
+- **Wrong-model rejection:** `/api/print` refuses a JTC whose model isn't in the
+  tab's `models` (HTTP 409 `{error, wrongModel}`) — it is **not** queued or staged,
+  and the operator sees "JTC … is model X — not handled by this tab (…). This station
+  handles: …". This is the real enforcement point (the search filter only hides
+  suggestions; a **scan** bypasses it). Applies to any tab with a `models` list; the
+  welding JTC shares its model with the painting parent, so welding→painting is safe.
+- **Model-filtered JTC suggestions:** `/api/jtc/search?q=&location=` now limits the
+  suggestion list to the tab's `models` (empty models = no filter), so a workcell
+  only surfaces JTCs for the model(s) it prints. mssql builds a bound-param
+  `UPPER(spg.Code) IN (@m0,@m1,…)` clause over `SubProductGroup.Code` (works on all
+  SQL Server versions — no `STRING_SPLIT`); mock filters in JS; postgres ignores it
+  (no model column). Same principle as the QR gate — a cell works only
+  its own models. (Both the welding and painting JTCs are the same model, e.g.
+  K2VG, so the welding JTC the operator scans still appears.)
+- **Code:** `server/bindingQueue.js` (add/list/scan/releasePrint/remove/clear);
+  routing in `autoPrint.js` (`poll` + `testTrigger`) and `index.js` `/api/print`;
+  endpoints `GET /api/binding`, `POST /api/binding/{scan,print,remove,clear}`;
+  `requireQrBinding` exposed via `/api/locations`; frontend task-list + scan-routing
+  (tokens ending `:START`/`:END` route to the gate) in `public/app.js` + `index.html`
+  + `styles.css`. QR **token values are NOT persisted** — pure unlock, no audit log
+  (all label data already exists in the DB).
+
+**Deferred (future):** more than one job at a time per workcell (needs distinct tag
+sets / per-piece binding).
 
 ---
 

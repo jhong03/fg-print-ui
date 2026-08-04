@@ -35,7 +35,8 @@ const path = require('node:path');
 const db = require('./db');
 const locations = require('./locations');
 const printQueue = require('./printQueue');
-const { isLeakTest } = require('./paintingFlow');
+const bindingQueue = require('./bindingQueue');
+const { isLeakTest, resolvePainting } = require('./paintingFlow');
 
 const STATE_FILE = path.join(__dirname, '..', 'auto-print-state.json');
 const MAX_PRINTED_IDS = 5000; // bound the dedupe set; keep the most-recent ids
@@ -152,12 +153,19 @@ async function poll() {
 
       // Dedup on the completing (welding) Job.Id, so one welding completion => one
       // painting print even though we enqueue a different (painting) JTC.
-      printQueue.add(target.printJtc, target.loc.id, target.sourceJtc);
+      // A requireQrBinding tab STAGES the job for QR binding instead of printing;
+      // it only reaches the print queue after the operator scans Green + Red.
+      if (target.loc.requireQrBinding) {
+        bindingQueue.add(target.printJtc, target.loc.id, target.sourceJtc);
+      } else {
+        printQueue.add(target.printJtc, target.loc.id, target.sourceJtc);
+      }
       printedIds.add(jobId);
       lastQueued = { jtcNo: target.printJtc, sourceJtc: r.jtcNo, model: r.model, location: target.loc.id };
       changed = true;
+      const how = target.loc.requireQrBinding ? 'staged for QR binding' : 'queued';
       const via = target.printJtc !== r.jtcNo ? ` (painting of welding ${r.jtcNo})` : '';
-      console.log(`[auto] queued ${target.printJtc}${via} [job ${jobId}, model ${r.model}] -> ${target.loc.id}`);
+      console.log(`[auto] ${how} ${target.printJtc}${via} [job ${jobId}, model ${r.model}] -> ${target.loc.id}`);
     }
 
     if (newWatermark !== watermark) { watermark = newWatermark; changed = true; }
@@ -229,9 +237,20 @@ async function testTrigger(jtcNo, locationOverride = null) {
     }
   }
 
-  const r = printQueue.add(jtcNo, loc.id);
-  console.log(`[auto] TEST trigger: JTC ${jtcNo} (model ${rec.model}) -> ${loc.id}`);
-  return { ok: true, jtcNo, model: rec.model, location: loc.id, queueId: r.id, position: r.position, paused: r.paused };
+  // Resolve welding->painting exactly like the real poll / manual print do, so the
+  // simulation stages the PAINTING JTC (with provenance + SB prepend), not the raw
+  // welding one. For non-welding tabs this is a no-op (target = the entered job).
+  const { record: target, sourceJtc } = await resolvePainting(rec, loc, db);
+  const printJtc = target.jtcNo;
+
+  if (loc.requireQrBinding) {
+    const b = bindingQueue.add(printJtc, loc.id, sourceJtc);
+    console.log(`[auto] TEST trigger: JTC ${jtcNo} (model ${rec.model}) -> ${loc.id} (staged ${printJtc} for QR binding)`);
+    return { ok: true, jtcNo, printJtc, sourceJtc, model: rec.model, location: loc.id, staged: true, bindingId: b.id };
+  }
+  const r = printQueue.add(printJtc, loc.id, sourceJtc);
+  console.log(`[auto] TEST trigger: JTC ${jtcNo} (model ${rec.model}) -> ${loc.id} (queued ${printJtc})`);
+  return { ok: true, jtcNo, printJtc, sourceJtc, model: rec.model, location: loc.id, queueId: r.id, position: r.position, paused: r.paused };
 }
 
 function status() {

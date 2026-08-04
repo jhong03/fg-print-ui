@@ -22,8 +22,11 @@
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K2VG"],
-    "weldingToPainting": true
+    "models": ["E23"],
+    "weldingToPainting": true,
+    "processCodePrepend": "SB",
+    "requireQrBinding": true,
+    "qrWorkcell": "K2VG-CELL"
   },
   {
     "id": "work-order-p3-k0wy",
@@ -32,6 +35,6 @@
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K0WY"]
+    "models": ["E21"]
   }
 ]

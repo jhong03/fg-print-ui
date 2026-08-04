@@ -36,7 +36,9 @@ function getPool() {
   return pool;
 }
 
-async function search(term) {
+// `models` is accepted for a uniform adapter signature but ignored here — the
+// legacy Postgres snapshot has no model column to filter on.
+async function search(term, _models) {
   const { rows } = await getPool().query(sql.search, [`%${term}%`]);
   return rows;
 }

@@ -58,7 +58,7 @@ const RECORDS = [
     customer: 'YOLLINK TEST',
     partName: 'E23-0100-WF',
     partNo: 'E23-0100-WF',
-    model: 'K0WY',
+    model: 'E21',
     date: '28/07/2026',
     qty: 46,
     uom: 'PCS',
@@ -79,7 +79,7 @@ const RECORDS = [
     customer: 'KOIKE (M) SDN BHD (BATU KAWAN)',
     partName: 'MUFFLER COMP, EXHAUST',
     partNo: 'E23-0100',
-    model: 'K2VG',
+    model: 'E23',
     date: '30/07/2026',
     qty: 50,
     uom: 'PCS',
@@ -103,7 +103,7 @@ const RECORDS = [
     customer: 'KOIKE (M) SDN BHD (BATU KAWAN)',
     partName: 'MUFFLER COMP, EXHAUST (WOF)',
     partNo: 'E23-0100-WF',
-    model: 'K2VG',
+    model: 'E23',
     date: '29/07/2026',
     qty: 50,
     uom: 'PCS',
@@ -116,10 +116,16 @@ const RECORDS = [
   },
 ];
 
-async function search(term) {
+async function search(term, models) {
   const q = term.toLowerCase();
+  // Model filter mirrors mssql: when the calling tab has models, only its models
+  // surface. Empty/absent = all.
+  const set = Array.isArray(models) && models.length
+    ? new Set(models.map((m) => String(m).trim().toUpperCase()))
+    : null;
   return RECORDS
     .filter((r) => r.jtcNo.toLowerCase().includes(q))
+    .filter((r) => !set || set.has(String(r.model || '').trim().toUpperCase()))
     .slice(0, 10)
     .map((r) => ({ jtcNo: r.jtcNo, partName: r.partName }));
 }

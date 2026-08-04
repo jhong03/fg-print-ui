@@ -59,7 +59,7 @@ module.exports = {
         c.Name            AS customer,
         p.Name            AS partName,
         p.PartNumber      AS partNo,
-        spg.Name          AS model,
+        spg.Code          AS model,
         -- Format the date in SQL (style 103 = dd/mm/yyyy) so it can't be shifted
         -- by JS timezone conversion. CreateDate is a tz-less wall-clock datetime;
         -- the driver would otherwise read it as UTC and a late-afternoon time
@@ -99,14 +99,20 @@ module.exports = {
       // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
       // so both surface results. GROUP BY OrderNumber dedupes when several jobs
       // share a JTC No; TOP 10 keeps the dropdown snappy. Newest job first.
-      search: `
+      // Suggestions list. `modelClause` is an optional, already-parameterised
+      // "AND UPPER(spg.Code) IN (@m0,@m1,…)" the adapter injects when the tab has
+      // models — so a workcell surfaces only its own model(s). Built this way (not
+      // STRING_SPLIT) to work on older SQL Server compatibility levels too. Empty
+      // clause = no filter. The model params themselves are bound by the adapter.
+      searchBase: (modelClause = '') => `
         SELECT TOP 10
           j.OrderNumber AS jtcNo,
           MAX(p.Name)   AS partName
         FROM dbo.Job j
         LEFT JOIN dbo.Product p ON p.Id = j.ProductId
-        WHERE j.OrderNumber LIKE @jtc
-           OR CAST(j.Id AS varchar(20)) LIKE @jtc
+        LEFT JOIN dbo.SubProductGroup spg ON spg.Id = p.SubProductGroupId
+        WHERE (j.OrderNumber LIKE @jtc OR CAST(j.Id AS varchar(20)) LIKE @jtc)
+          ${modelClause}
         GROUP BY j.OrderNumber
         ORDER BY MAX(j.Id) DESC
       `,

@@ -31,6 +31,19 @@
       <p id="status" class="status" role="status"></p>
     </section>
 
+    <!-- QR binding gate (phase 2): shown only on requireQrBinding tabs. Placed high
+         up — right under the JTC field — so operators can't miss the scan step. The
+         Work Order label releases to the print queue only after both tags scan. -->
+    <section class="binding" id="bindingPanel" hidden>
+      <div class="binding__head">
+        <span class="binding__title">QR binding required</span>
+        <span id="bindingState" class="binding__state"></span>
+      </div>
+      <ul id="bindingList" class="binding__list"></ul>
+      <p id="bindingError" class="binding__error" role="alert" hidden></p>
+      <p class="binding__note">Scan this workcell's <b class="dot dot--green">Green (Start)</b> and <b class="dot dot--red">Red (End)</b> QR tags to release the label. Wrong tag? It's rejected — just scan the correct one.</p>
+    </section>
+
     <!-- Label preview -->
     <section class="stage" id="stage">
       <div class="empty" id="emptyState">
@@ -77,7 +90,7 @@
   </main>
 
   <script src="/vendor/JsBarcode.all.min.js"></script>
-  <script src="labelPreview.js"></script>
-  <script src="app.js"></script>
+  <script src="labelPreview.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

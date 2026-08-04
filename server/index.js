@@ -10,6 +10,7 @@ const { buildModel } = require('./label/model');
 const agent = require('./agent');
 const locations = require('./locations');
 const printQueue = require('./printQueue');
+const bindingQueue = require('./bindingQueue');
 const autoPrint = require('./autoPrint');
 const { resolvePainting } = require('./paintingFlow');
 
@@ -59,6 +60,8 @@ app.get('/api/locations', (req, res) => {
       name: l.name,
       templateId: l.templateId,
       variant: l.variant,
+      // Tells the UI this tab gates printing behind a QR scan (task-list flow).
+      requireQrBinding: l.requireQrBinding,
     }))
   );
 });
@@ -68,7 +71,9 @@ app.get('/api/jtc/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json([]);
   try {
-    const rows = await db.search(q);
+    // Limit suggestions to the tab's models (empty models list = no filter),
+    // so a workcell only surfaces JTCs for the model(s) it prints.
+    const rows = await db.search(q, resolveLocation(req).models);
     res.json(rows);
   } catch (err) {
     console.error('[search]', err.message);
@@ -148,6 +153,21 @@ app.post('/api/print', async (req, res) => {
   let sourceJtc = null;
   try {
     const record = await db.getOne(no);
+    // Model guard: a tab with a models list only handles its own model(s). A
+    // scanned/typed JTC for another model is rejected (not queued/staged) — the
+    // operator sees "not under this tab". (Matches the model-filtered search; a scan
+    // bypasses that filter, so this is the real enforcement point.) The entered
+    // (welding) JTC shares the model with its painting parent, so this is safe for
+    // the welding->painting flow too.
+    if (record && loc.models?.length) {
+      const m = String(record.model || '').trim().toUpperCase();
+      if (!loc.models.includes(m)) {
+        return res.status(409).json({
+          error: `JTC ${record.jtcNo} is model ${record.model || '—'} — not handled by this tab (${loc.name}). This station handles: ${loc.models.join(', ')}.`,
+          wrongModel: true,
+        });
+      }
+    }
     if (record) {
       const t = await resolvePainting(record, loc, db);
       jtcToQueue = t.record.jtcNo;
@@ -155,6 +175,12 @@ app.post('/api/print', async (req, res) => {
     }
   } catch (err) {
     console.error('[print] resolve failed, queuing as-is:', err.message);
+  }
+  // QR-gated tab: don't print — STAGE the job for binding. It reaches the print
+  // queue only after the operator scans this workcell's Green + Red QR tags.
+  if (loc.requireQrBinding) {
+    const b = bindingQueue.add(jtcToQueue, loc.id, sourceJtc);
+    return res.json({ success: true, binding: true, id: b.id, printJtc: jtcToQueue, sourceJtc });
   }
   const r = printQueue.add(jtcToQueue, loc.id, sourceJtc);
   res.json({
@@ -172,6 +198,41 @@ app.post('/api/queue/resume', (req, res) => { printQueue.resume(); res.json(prin
 app.post('/api/queue/remove', (req, res) => { printQueue.remove(req.body?.id); res.json(printQueue.list()); });
 app.post('/api/queue/clear', (req, res) => { printQueue.clearFinished(); res.json(printQueue.list()); });
 app.post('/api/queue/clear-all', (req, res) => { printQueue.clearAll(); res.json(printQueue.list()); });
+
+// ---- QR binding (phase 2) -------------------------------------------------
+// The pending-binding queue for QR-gated tabs. The job is staged here (by the
+// auto-watcher or a manual scan) and only released to the print queue once the
+// operator scans this workcell's Green (Start) + Red (End) tags. GET is per
+// location so a station only sees its own staged work.
+app.get('/api/binding', (req, res) => {
+  res.json({ jobs: bindingQueue.list(resolveLocation(req).id) });
+});
+// Validate one scanned QR token against the active item; records Start/End.
+// A mismatch returns 200 with { ok:false, error } — it's a normal, retryable
+// outcome (no lockout), so the UI just shows the message and lets the operator
+// rescan the correct tag.
+app.post('/api/binding/scan', (req, res) => {
+  const loc = resolveLocation(req);
+  const token = (req.body?.token || '').trim();
+  if (!token) return res.status(400).json({ ok: false, error: 'Missing token' });
+  res.json(bindingQueue.scan(loc.id, token, req.body?.id));
+});
+// Release the selected item to the print queue — the gated print. Fails unless both
+// tags are bound (no bypass). Returns the binding list so the UI stays in sync.
+app.post('/api/binding/print', (req, res) => {
+  const loc = resolveLocation(req);
+  const r = bindingQueue.releasePrint(loc.id, req.body?.id);
+  res.json({ ...r, jobs: bindingQueue.list(loc.id) });
+});
+app.post('/api/binding/remove', (req, res) => {
+  bindingQueue.remove(req.body?.id);
+  res.json({ jobs: bindingQueue.list(resolveLocation(req).id) });
+});
+app.post('/api/binding/clear', (req, res) => {
+  const loc = resolveLocation(req);
+  bindingQueue.clear(loc.id);
+  res.json({ jobs: bindingQueue.list(loc.id) });
+});
 
 // Auto-print watcher status (for the UI badge + diagnostics). GET /api/auto
 app.get('/api/auto', (req, res) => res.json(autoPrint.status()));

@@ -94,6 +94,11 @@ function selectLocation(loc) {
     renderLabelPreview(currentJtc, labelMount, currentLocation);
     if (!tsplPanel.hidden) refreshTspl();
   }
+  // Reset binding selection so the new tab shows its own staged work (front item).
+  selectedBindingId = null;
+  bindingCleared = false;
+  lastMaxBindingId = 0;
+  refreshBinding();        // pick up the new tab's staged work (if any)
   input.focus();
 }
 
@@ -137,6 +142,9 @@ input.addEventListener('input', (e) => {
  * to the suggestion list rather than showing a "not found" dead end.
  */
 async function acceptScan(q) {
+  // A scanned QR TAG (…:START / …:END) is a binding scan, not a JTC lookup —
+  // route it to the QR gate and clear the box for the next scan.
+  if (isQrToken(q)) { bindingScan(q); input.value = ''; input.focus(); return; }
   if (input.value.trim() !== q) return;   // superseded while we waited
   hideSuggestions();
   setStatus('Loading ' + q + '…');
@@ -151,16 +159,18 @@ async function acceptScan(q) {
   if (!record) { setStatus(''); runSearch(q); return; }
   // Show the resolved JTC No — a scanned barcode id isn't the order number.
   input.value = record.jtcNo || q;
-  renderLabel(record);
+  // On a QR-gated tab the preview is driven by the binding list (selected item),
+  // so DON'T renderLabel here — just stage it (avoids a second, conflicting draw).
+  if (!currentLocation?.requireQrBinding) renderLabel(record);
   // A scan queues the print hands-free — no button press. (Manual lookups still
-  // wait for the Print Label button.)
+  // wait for the Print Label button.) On a QR tab this stages for binding instead.
   enqueuePrint(record.jtcNo || q, { fromScan: true });
   input.select();   // leave it selected so the next scan replaces it
 }
 
 async function runSearch(q) {
   try {
-    const res = await fetch('/api/jtc/search?q=' + encodeURIComponent(q));
+    const res = await fetch('/api/jtc/search?q=' + encodeURIComponent(q) + locQuery());
     if (!res.ok) throw new Error('search failed');
     const rows = await res.json();
     // Ignore stale responses if the box changed while we waited.
@@ -225,12 +235,15 @@ input.addEventListener('keydown', (e) => {
     highlight(items);
   } else if (e.key === 'Enter') {
     e.preventDefault();
+    const raw = input.value.trim();
+    // A QR tag scanned with an Enter suffix is a binding scan, not a JTC.
+    if (isQrToken(raw)) { bindingScan(raw); input.value = ''; return; }
     // Highlighted suggestion wins; otherwise take the raw value.
     // Barcode scanners type the whole code then send Enter — this loads it.
     if (activeIndex >= 0 && currentList[activeIndex]) {
       selectJtc(currentList[activeIndex].jtcNo);
-    } else if (input.value.trim()) {
-      selectJtc(input.value.trim());
+    } else if (raw) {
+      selectJtc(raw);
     }
   } else if (e.key === 'Escape') {
     hideSuggestions();
@@ -268,8 +281,15 @@ async function selectJtc(jtcNo) {
       setStatus('No job found for ' + jtcNo, true);
       return;
     }
-    renderLabel(record);
-    setStatus('');
+    // QR-gated tab: ENTERING a JTC (typed + Enter, or a suggestion click) STAGES
+    // it and lets the binding list drive the (single) preview — so don't renderLabel
+    // here (that was the second, conflicting draw). Non-QR tabs render as before.
+    if (currentLocation?.requireQrBinding) {
+      enqueuePrint(record.jtcNo, { fromScan: false });
+    } else {
+      renderLabel(record);
+      setStatus('');
+    }
   } catch (e) {
     showEmpty();
     setStatus(e.message, true);
@@ -328,8 +348,10 @@ function setStatus(msg, isError) {
 // ---- Actions --------------------------------------------------------------
 let currentJtc = null;
 
-// Manual print: the button queues the currently-shown JTC.
+// Manual print: the button queues the currently-shown JTC. On a QR-gated tab it
+// instead releases the bound job (gated — disabled until both tags are scanned).
 printBtn.addEventListener('click', () => {
+  if (currentLocation?.requireQrBinding) { bindingReleasePrint(); return; }
   if (!currentJtc) return;
   enqueuePrint(currentJtc, { fromScan: false });
 });
@@ -348,6 +370,16 @@ async function enqueuePrint(jtcNo, { fromScan } = {}) {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.success) throw new Error(body.error || 'Could not queue');
+    // QR-gated tab: the server STAGED the job instead of queuing it. Surface the
+    // task-list; nothing prints until Green + Red are scanned.
+    if (body.binding) {
+      // Select the just-staged job so its (single) preview shows and scans target it.
+      if (body.id != null) selectedBindingId = body.id;
+      bindingCleared = false;
+      setStatus('Staged — scan the Green (Start) and Red (End) QR tags to release the label.');
+      await refreshBinding();
+      return;
+    }
     const verb = fromScan ? 'Scanned & queued' : 'Queued';
     const queued = body.printJtc || jtcNo;
     // If a Welding JTC resolved to its Painting parent, say so.
@@ -430,6 +462,14 @@ reloadTplBtn.addEventListener('click', async () => {
 });
 
 clearBtn.addEventListener('click', () => {
+  // Clear resets ONLY the JTC field + preview. It does NOT clear the binding queue —
+  // staged jobs persist; on a QR tab this just deselects (blank preview, rows stay).
+  // Remove staged jobs individually with the ✕ on each row.
+  if (currentLocation?.requireQrBinding) {
+    selectedBindingId = null;
+    bindingCleared = true;
+    refreshBinding();   // re-render the rows unselected
+  }
   input.value = '';
   showEmpty();
   hideTspl();
@@ -609,3 +649,203 @@ refreshQueue();
 setInterval(refreshQueue, 2000);
 refreshAuto();
 setInterval(refreshAuto, 5000);
+
+// ---- QR binding gate (phase 2) --------------------------------------------
+/*
+ * On a requireQrBinding tab, a job is STAGED (by the auto-watcher or a manual
+ * scan) and shown here as a task-list. The operator scans this workcell's Green
+ * (Start) and Red (End) engraved QR tags; only when both validate does the label
+ * go to the print queue. A wrong/other-workcell tag is rejected (no lockout).
+ * QR tags scan as `<workcell>:START` / `:END`, which the scan handlers route here.
+ */
+const bindingPanel = document.getElementById('bindingPanel');
+const bindingList = document.getElementById('bindingList');
+const bindingState = document.getElementById('bindingState');
+const bindingError = document.getElementById('bindingError');
+
+const QR_TOKEN_RE = /:(START|END)\s*$/i;
+function isQrToken(v) { return QR_TOKEN_RE.test(String(v || '').trim()); }
+
+let bindingReleasing = false; // guards the one-shot auto-release on full binding
+let selectedBindingId = null; // which staged item the preview + scan + print target
+let bindingCleared = false;   // Clear deselects (blank preview) without touching the queue
+let lastMaxBindingId = 0;     // detect newly-staged jobs (ids ascend) to re-surface them
+
+function bindLocQuery() {
+  return currentLocation ? '?location=' + encodeURIComponent(currentLocation.id) : '';
+}
+
+async function refreshBinding() {
+  if (!currentLocation?.requireQrBinding) { renderBinding([]); return; }
+  try {
+    const r = await (await fetch('/api/binding' + bindLocQuery())).json();
+    renderBinding(r.jobs || []);
+  } catch (_) { /* transient; the poll retries */ }
+}
+
+function renderBinding(jobs) {
+  // Non-QR tab (or none staged): keep the panel hidden and the Print button normal.
+  if (!currentLocation?.requireQrBinding) {
+    bindingPanel.hidden = true;
+    printBtn.disabled = false;
+    printBtn.textContent = 'Print label';
+    return;
+  }
+  bindingPanel.hidden = jobs.length === 0;
+
+  // A newly-staged job (ids ascend) re-surfaces the preview even after a Clear.
+  const maxId = jobs.reduce((m, j) => Math.max(m, j.id), 0);
+  if (maxId > lastMaxBindingId) { lastMaxBindingId = maxId; bindingCleared = false; }
+
+  // The SELECTED item drives everything (one preview, one scan/print target).
+  // Default to the front item UNLESS the operator hit Clear (then nothing is
+  // selected → blank preview, but the queue rows stay). Keep the selection valid
+  // if the previously-selected item was printed away / removed.
+  let sel = jobs.find((j) => j.id === selectedBindingId);
+  if (!sel && !bindingCleared) { sel = jobs[0] || null; selectedBindingId = sel ? sel.id : null; }
+  if (!sel) selectedBindingId = null;
+
+  // ONE preview, driven ONLY by the selected item (never by a separate manual
+  // render — that was the double-preview bug). Render from the welding JTC
+  // (sourceJtc) so the server applies welding->painting + SB prepend and returns
+  // provenance. Guard on currentJtc so we don't redraw what's already shown.
+  const previewJtc = sel ? (sel.sourceJtc || sel.paintingJtc) : null;
+  if (previewJtc && previewJtc !== currentJtc) {
+    currentJtc = previewJtc;
+    emptyState.hidden = true;
+    label.hidden = false;
+    actions.hidden = false;
+    renderLabelPreview(previewJtc, labelMount, currentLocation).then(showProvenance);
+  }
+
+  // Gate the Print button + header to the SELECTED item.
+  if (sel) {
+    const complete = sel.boundStart && sel.boundEnd;
+    printBtn.disabled = !complete;
+    printBtn.textContent = complete ? (sel.printed ? 'Reprint label' : 'Print label') : 'Scan QR to print';
+    const done = (sel.boundStart ? 1 : 0) + (sel.boundEnd ? 1 : 0);
+    bindingState.textContent = sel.printed
+      ? 'Sent to print queue'
+      : (done === 2 ? 'Ready' : done + '/2 tags scanned');
+  } else {
+    bindingState.textContent = '';
+  }
+
+  // Rows: click a row to select it (its preview shows and its tags are what the
+  // next scan binds). The SELECTED row shows the Green/Red task-list.
+  bindingList.innerHTML = '';
+  jobs.forEach((j) => {
+    const isSel = j.id === selectedBindingId;
+    const li = document.createElement('li');
+    li.className = 'b-item' + (isSel ? ' b-item--active' : '');
+    li.addEventListener('click', () => {
+      selectedBindingId = j.id;
+      bindingCleared = false;
+      renderBinding(jobs);
+    });
+
+    const head = document.createElement('div');
+    head.className = 'b-head';
+    const jtc = document.createElement('span');
+    jtc.className = 'b-jtc';
+    jtc.textContent = j.paintingJtc + (j.printed ? '  · sent' : (isSel ? '' : '  · waiting'));
+    head.appendChild(jtc);
+    if (j.sourceJtc) {
+      const src = document.createElement('span');
+      src.className = 'b-source';
+      src.textContent = '↳ from ' + j.sourceJtc;
+      head.appendChild(src);
+    }
+
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'b-remove';
+    rm.title = 'Remove from binding queue';
+    rm.textContent = '✕';
+    rm.addEventListener('click', (e) => { e.stopPropagation(); removeBinding(j.id); });
+
+    li.append(head, rm);
+
+    if (isSel) {
+      const tasks = document.createElement('div');
+      tasks.className = 'b-tasks';
+      tasks.append(taskPill('green', 'Green · Start', j.boundStart), taskPill('red', 'Red · End', j.boundEnd));
+      li.insertBefore(tasks, rm);
+    }
+    bindingList.appendChild(li);
+  });
+
+  // Auto-release once the SELECTED item's tags are both in (hands-free path); the
+  // Print button is the manual equivalent. The server's `printed` flag stops repeats.
+  if (sel && sel.boundStart && sel.boundEnd && !sel.printed && !bindingReleasing) {
+    bindingReleasing = true;
+    bindingReleasePrint().finally(() => { bindingReleasing = false; });
+  }
+}
+
+function taskPill(colour, text, done) {
+  const s = document.createElement('span');
+  s.className = 'b-pill b-pill--' + colour + (done ? ' b-pill--done' : '');
+  s.textContent = (done ? '☑ ' : '☐ ') + text;
+  return s;
+}
+
+async function bindingScan(token) {
+  try {
+    const res = await fetch('/api/binding/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: currentLocation?.id, token, id: selectedBindingId }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (body.ok) { hideBindingError(); }
+    else { showBindingError(body.error || 'QR tag rejected.'); }
+    await refreshBinding();
+  } catch (e) {
+    showBindingError(e.message);
+  }
+  input.focus();
+}
+
+async function bindingReleasePrint() {
+  try {
+    const res = await fetch('/api/binding/print', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: currentLocation?.id, id: selectedBindingId }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!body.ok) { showBindingError(body.error || 'Could not release the label.'); return; }
+    hideBindingError();
+    setStatus('QR bound — Work Order label sent to the print queue.');
+    renderBinding(body.jobs || []);
+    refreshQueue();
+  } catch (e) {
+    showBindingError(e.message);
+  }
+}
+
+async function removeBinding(id) {
+  try {
+    const r = await (await fetch('/api/binding/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, location: currentLocation?.id }),
+    })).json();
+    renderBinding(r.jobs || []);
+  } catch (e) {
+    showBindingError(e.message);
+  }
+}
+
+function showBindingError(msg) {
+  bindingError.hidden = false;
+  bindingError.textContent = msg;
+}
+function hideBindingError() {
+  bindingError.hidden = true;
+  bindingError.textContent = '';
+}
+
+refreshBinding();
+setInterval(refreshBinding, 2000);

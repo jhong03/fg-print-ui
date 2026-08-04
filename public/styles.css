@@ -335,6 +335,82 @@ html, body {
   border-color: var(--line);
 }
 .btn--ghost:hover { background: #eef0f2; }
+.btn:disabled { opacity: 0.5; cursor: default; filter: none; }
+
+/* ---- QR binding gate (phase 2) ---- */
+.binding {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.binding__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+.binding__title { font-weight: 600; }
+.binding__state { font-size: 13px; color: var(--ink-soft); }
+.binding__list { list-style: none; margin: 12px 0 0; padding: 0; }
+.b-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 8px;
+  border-top: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.b-item:first-child { border-top: none; }
+.b-item:hover { background: #f6f7f9; }
+/* The selected row — its preview is shown and its tags are what the next scan binds. */
+.b-item--active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.b-item--active:hover { background: var(--accent-soft); }
+.b-head { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 200px; }
+.b-jtc { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
+.b-source { font-size: 12px; color: var(--ink-soft); font-family: var(--mono); overflow-wrap: anywhere; }
+.b-tasks { display: flex; flex-wrap: wrap; gap: 8px; }
+.b-pill {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.b-pill--green.b-pill--done { color: #1c6b3f; background: #e7f4ec; border-color: #cfe8d9; }
+.b-pill--red.b-pill--done   { color: #8a2b2b; background: #fbeceb; border-color: #f2d4d2; }
+.b-remove {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.b-remove:hover { color: var(--danger); border-color: var(--danger); }
+.binding__error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fbeceb;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+.binding__note { margin: 12px 0 0; font-size: 12px; color: var(--ink-soft); }
+.dot { font-weight: 700; }
+.dot--green { color: #1c6b3f; }
+.dot--red { color: #8a2b2b; }
 
 /* ---- TSPL preview panel ---- */
 .tspl {
@@ -386,7 +462,7 @@ html, body {
 @media print {
   html, body { background: #fff; }
   .page { max-width: none; padding: 0; margin: 0; }
-  .search, .actions, .empty, .tspl { display: none !important; }
+  .search, .actions, .empty, .tspl, .binding { display: none !important; }
   .label {
     border: none;
     border-radius: 0;

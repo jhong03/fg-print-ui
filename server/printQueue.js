@@ -31,6 +31,7 @@ const { mapRecordToFields } = require('./label/mapRecord');
 const agent = require('./agent');
 const locations = require('./locations');
 const spooler = require('./spooler');
+const { prependProcessCode } = require('./paintingFlow');
 
 const FILE = path.join(__dirname, '..', 'print-jobs.json');
 const DONE_HISTORY = 15;          // finished jobs kept for the operator to see
@@ -193,6 +194,10 @@ async function dispatch(job, loc) {
   try {
     const record = await db.getOne(job.jtcNo);
     if (!record) return { verdict: 'skip', error: 'JTC not found' };
+    // Welding->Painting print (job came from a welding JTC): apply the location's
+    // processCodePrepend so the printed label matches the preview (e.g. "SB, PL").
+    // Gated on sourceJtc so a painting JTC printed directly stays untouched.
+    if (job.sourceJtc) prependProcessCode(record, loc);
     const template = await getTemplate(loc.templateId);
     tspl = renderTspl(template, mapRecordToFields(record), { variant: loc.variant, barcodeNudge: loc.barcodeNudge, upright: loc.upright });
   } catch (err) {

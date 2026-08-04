@@ -63,12 +63,23 @@ function getPool() {
   return poolPromise;
 }
 
-async function search(term) {
+// `models` (optional) is an array of model names; when non-empty the results are
+// limited to JTCs of those models (the calling tab's `models`). Empty/absent = all.
+// The IN list is built as bound params (@m0, @m1, …) so it stays injection-safe and
+// works on every SQL Server version (no STRING_SPLIT dependency).
+async function search(term, models) {
   const pool = await getPool();
-  const result = await pool
-    .request()
-    .input('jtc', `%${term}%`)
-    .query(sql.search);
+  const req = pool.request().input('jtc', `%${term}%`);
+  const list = Array.isArray(models) ? models.filter(Boolean) : [];
+  let modelClause = '';
+  if (list.length) {
+    const params = list.map((m, i) => {
+      req.input('m' + i, String(m).toUpperCase());
+      return '@m' + i;
+    });
+    modelClause = `AND UPPER(spg.Code) IN (${params.join(', ')})`;
+  }
+  const result = await req.query(sql.searchBase(modelClause));
   return result.recordset;
 }
 
