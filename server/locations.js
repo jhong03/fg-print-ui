@@ -94,9 +94,13 @@ function resolveEntry(entry, d) {
   // absent = show the routing's process code exactly as MES has it. Applied only
   // when a welding->painting resolution actually happened; see paintingFlow.js.
   const processCodePrepend = String(entry.processCodePrepend || '').trim();
+  // Master-tab grouping: a category label so the UI can bucket locations (e.g. "P1",
+  // "P3"). Blank falls back to "Other" in the UI.
+  const group = String(entry.group || '').trim();
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
+    group,
     templateId: String(entry.templateId || d.templateId),
     printerType: String(entry.printerType || d.printerType),
     agentUrl: String(entry.agentUrl || d.agentUrl).replace(/\/+$/, ''),

@@ -58,6 +58,7 @@ app.get('/api/locations', (req, res) => {
     locations.list().map((l) => ({
       id: l.id,
       name: l.name,
+      group: l.group,
       templateId: l.templateId,
       variant: l.variant,
       // Tells the UI this tab gates printing behind a QR scan (task-list flow).
@@ -69,10 +70,10 @@ app.get('/api/locations', (req, res) => {
 // Suggestions for the search box / scanner. GET /api/jtc/search?q=...
 app.get('/api/jtc/search', async (req, res) => {
   const q = (req.query.q || '').trim();
-  if (!q) return res.json([]);
   try {
-    // Limit suggestions to the tab's models (empty models list = no filter),
-    // so a workcell only surfaces JTCs for the model(s) it prints.
+    // Empty q is allowed: it returns the most RECENT JTCs for the tab's model, so a
+    // touchscreen operator (no keyboard) can tap one from the dropdown. Non-empty q
+    // filters as usual. Either way, limited to the tab's models (empty list = all).
     const rows = await db.search(q, resolveLocation(req).models);
     res.json(rows);
   } catch (err) {

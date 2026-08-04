@@ -8,13 +8,16 @@ are held/retried), and the **reload-template mechanism**.
 ## 1. Simple operator instructions
 
 1. **Open** the app: `http://localhost:3000`
-2. **Pick the destination tab** — *P1 FG Sticker (QC)*, *(Plain)*, *Work Order (P3)
-   – K2VG*, *Work Order (P3) – K0WY*. Your choice is remembered on this terminal.
+2. **Pick the group** (master tab, e.g. *P1* / *P3*), then the **destination tab**
+   within it (*FG Sticker (QC)*, *Work Order (P3) – K2VG*, …). Your choice is
+   remembered on this terminal. (The group row only appears when there's more than one
+   group; the destination row only when a group has more than one tab.)
 3. **Pick the job:**
    - **Scan** the JTC barcode (or paste it) → it loads **and queues to print
      automatically**, hands-free.
-   - **Type** it → matches appear; press Enter / tap one to load, then click
-     **Print label** to queue it.
+   - **Tap the JTC field** (touchscreen, no keyboard) → a dropdown of the **recent
+     JTCs for this tab's model** appears; tap one to load it. Typing (if a keyboard
+     exists) filters the list live.
    - On the **K2VG Work Order** tab, entering/scanning a **Welding Line (Leak-Test)
      JTC** shows its **Painting Line** label (its next process). A note under the
      preview says *"Showing Painting Line label … — from Welding JTC …"*.

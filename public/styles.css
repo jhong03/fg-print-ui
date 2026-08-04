@@ -70,6 +70,28 @@ html, body {
   border-bottom: 1px solid var(--surface);
 }
 
+/* Master tabs (groups, e.g. P1 / P3): a pill row above the destination tabs, so
+   locations are categorised by where they're from. */
+.tabs--master {
+  border-bottom: none;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.tab--master {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+.tab--master:hover { background: var(--accent-soft); }
+.tab--master.tab--active {          /* beats .tab--active on specificity */
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ---- Print queue ---- */
 .queue {
   margin-top: 28px;

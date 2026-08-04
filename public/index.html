@@ -8,7 +8,8 @@
 </head>
 <body>
   <main class="page">
-    <!-- Destination tabs (printer + label type). Populated from /api/locations. -->
+    <!-- Master tabs (groups, e.g. P1 / P3) + destination tabs. From /api/locations. -->
+    <div class="tabs tabs--master" id="masterTabs" role="tablist" aria-label="Label group" hidden></div>
     <div class="tabs" id="tabs" role="tablist" aria-label="Print destination" hidden></div>
 
     <!-- Search / scan -->
@@ -90,7 +91,7 @@
   </main>
 
   <script src="/vendor/JsBarcode.all.min.js"></script>
-  <script src="labelPreview.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="labelPreview.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

@@ -39,7 +39,7 @@ function mapRecordToFields(r) {
     coNumber: r.coNo || '',
     // The part NAME / description. P1's "Part Name" and P3's "PART NAME" both
     // bind this key.
-    partName: r.partNo || '',
+    partName: r.partName || '',
     dateIssue: formatDate(r.date),
     qty: r.qty != null ? String(r.qty) : '',
     jtc_barcodeId: barcode,

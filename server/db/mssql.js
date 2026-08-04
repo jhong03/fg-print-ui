@@ -10,7 +10,7 @@
  * The connection pool is created lazily on first use and reused after that.
  */
 
-const { mssql: sql } = require('./queries');
+const { mssql: sql, modelExpr: MODEL_EXPR } = require('./queries');
 
 let poolPromise = null;
 
@@ -77,7 +77,7 @@ async function search(term, models) {
       req.input('m' + i, String(m).toUpperCase());
       return '@m' + i;
     });
-    modelClause = `AND UPPER(spg.Code) IN (${params.join(', ')})`;
+    modelClause = `AND UPPER(${MODEL_EXPR}) IN (${params.join(', ')})`;
   }
   const result = await req.query(sql.searchBase(modelClause));
   return result.recordset;

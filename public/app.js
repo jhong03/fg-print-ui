@@ -17,6 +17,7 @@ const tsplView = document.getElementById('tsplView');
 const tsplCopy = document.getElementById('tsplCopy');
 const reloadTplBtn = document.getElementById('reloadTplBtn');
 const tabs = document.getElementById('tabs');
+const masterTabs = document.getElementById('masterTabs');
 
 let activeIndex = -1;   // highlighted suggestion for keyboard nav
 let currentList = [];   // current suggestion data
@@ -33,8 +34,19 @@ initLocations();
  * one for their station and it's remembered here so it survives a reload.
  */
 const LOC_KEY = 'jtc.locationId';
-let currentLocation = null;   // { id, name, templateId, variant } or null
+let currentLocation = null;   // { id, name, group, templateId, variant } or null
 let locationName = {};        // id -> friendly name, for labelling queued jobs
+let allLocations = [];        // every destination from /api/locations
+let currentGroup = null;      // the selected master tab (group)
+
+// Group helpers. A location with no `group` falls into "Other".
+const groupOf = (loc) => (loc && loc.group) || 'Other';
+function groupList() {
+  const seen = [];
+  allLocations.forEach((l) => { const g = groupOf(l); if (!seen.includes(g)) seen.push(g); });
+  return seen;
+}
+const locsInGroup = (g) => allLocations.filter((l) => groupOf(l) === g);
 
 // The location query string appended to GETs (empty until tabs load; the server
 // then falls back to the first tab, so a print is never mis-routed silently).
@@ -53,15 +65,44 @@ async function initLocations() {
   }
   if (!Array.isArray(list) || !list.length) return;
 
+  allLocations = list;
   // id -> name, so the queue can label each job with its destination.
   locationName = Object.fromEntries(list.map((l) => [l.id, l.name]));
 
   const savedId = localStorage.getItem(LOC_KEY);
   currentLocation = list.find((l) => l.id === savedId) || list[0];
-  if (list.length <= 1) return; // only one destination — no tab bar to show
+  currentGroup = groupOf(currentLocation);
+  renderMasterTabs();
+  renderSubTabs();
+}
 
+// Master tabs = the distinct groups (e.g. P1 / P3). Hidden when there's only one
+// group (no point categorising a single bucket).
+function renderMasterTabs() {
+  const groups = groupList();
+  if (groups.length <= 1) { masterTabs.hidden = true; masterTabs.innerHTML = ''; return; }
+  masterTabs.innerHTML = '';
+  groups.forEach((g) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab tab--master';
+    btn.setAttribute('role', 'tab');
+    btn.dataset.group = g;
+    btn.textContent = g;
+    btn.addEventListener('click', () => selectGroup(g));
+    masterTabs.appendChild(btn);
+  });
+  masterTabs.hidden = false;
+  markMasterTabs();
+}
+
+// Sub tabs = the destinations inside the current group. Hidden when the group has a
+// single destination (the master tab already IS that destination).
+function renderSubTabs() {
+  const locs = locsInGroup(currentGroup);
+  if (locs.length <= 1) { tabs.hidden = true; tabs.innerHTML = ''; return; }
   tabs.innerHTML = '';
-  list.forEach((loc) => {
+  locs.forEach((loc) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'tab';
@@ -75,6 +116,14 @@ async function initLocations() {
   markActiveTab();
 }
 
+function markMasterTabs() {
+  masterTabs.querySelectorAll('.tab').forEach((b) => {
+    const on = b.dataset.group === currentGroup;
+    b.classList.toggle('tab--active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
 function markActiveTab() {
   const id = currentLocation ? currentLocation.id : null;
   tabs.querySelectorAll('.tab').forEach((b) => {
@@ -84,10 +133,28 @@ function markActiveTab() {
   });
 }
 
+// Pick a master group: switch to its destinations and select one (keep the current
+// destination if it's in this group, else its first).
+function selectGroup(g) {
+  if (g === currentGroup) return;
+  currentGroup = g;
+  markMasterTabs();
+  renderSubTabs();
+  const locs = locsInGroup(g);
+  const target = locs.find((l) => l.id === currentLocation?.id) || locs[0];
+  if (target) selectLocation(target);
+}
+
 function selectLocation(loc) {
-  if (currentLocation && loc.id === currentLocation.id) return;
+  if (currentLocation && loc.id === currentLocation.id) { markActiveTab(); return; }
   currentLocation = loc;
   localStorage.setItem(LOC_KEY, loc.id);
+  // Keep the master tab + sub bar in sync if this selection changed the group.
+  if (groupOf(loc) !== currentGroup) {
+    currentGroup = groupOf(loc);
+    markMasterTabs();
+    renderSubTabs();
+  }
   markActiveTab();
   // The template + variant just changed, so anything on screen is now stale.
   if (currentJtc) {
@@ -117,6 +184,29 @@ let burstLen = 0;
 let lastCharAt = 0;
 
 input.addEventListener('paste', () => { pasted = true; });
+
+// Touchscreen support: the workcells have NO keyboard, so tapping the JTC field
+// opens the dropdown to pick from — recent JTCs for this tab's model when empty, or
+// matches for the current text. (The initial programmatic focus at load runs before
+// these listeners are attached, so it doesn't pop the list.)
+function openSuggestionsOnTap() {
+  const q = input.value.trim();
+  input.select();               // select any existing text so a scan/tap replaces it
+  if (q) runSearch(q); else showRecent();
+}
+input.addEventListener('focus', openSuggestionsOnTap);
+input.addEventListener('click', openSuggestionsOnTap);
+
+// Empty-query search = the most recent JTCs for this tab's model, to tap from.
+async function showRecent() {
+  try {
+    const res = await fetch('/api/jtc/search?q=' + locQuery());
+    if (!res.ok) return;
+    const rows = await res.json();
+    // Only show if the operator is still on an empty field (didn't scan/type since).
+    if (document.activeElement === input && !input.value.trim()) renderSuggestions(rows);
+  } catch (_) { /* transient; a later tap retries */ }
+}
 
 // ---- Search / suggestions -------------------------------------------------
 input.addEventListener('input', (e) => {

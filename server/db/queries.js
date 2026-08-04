@@ -22,11 +22,37 @@
  * of the app's expectations above) exactly as shown.
  */
 
+// The job "model" — the SINGLE identifier that ties the DB value, locations.json
+// `models`, auto-print routing, the wrong-model guard, and the JTC-suggestion filter
+// together. Defined in ONE place; swap it with MODEL_MODE in .env — no edits scattered
+// around the code. Presets are pre-built SQL expressions (never raw env text), so this
+// can't be a SQL-injection vector. After changing the mode, set locations.json
+// `models` to the matching values. `+ ISNULL(...)` concat (not CONCAT/STRING_SPLIT) so
+// it works on this older SQL Server too. Default 'name' = SubProductGroup.Name (K2VG).
+//   name       -> "K2VG"            (SubProductGroup.Name) [DEFAULT — group-level, unique,
+//                                    and SHARED by a welding job and its painting parent]
+//   code       -> "E23"             (SubProductGroup.Code; NOT unique — K0WY & K0WL both E21)
+//   stock      -> "E23-0100"        (Product.PartNumber alone)
+//   stock-name -> "E23-0100, K2VG"  (Product.PartNumber + Name) — PRODUCT-level, so a
+//                                    welding job (…-WF) differs from its painting parent
+//   code-name  -> "E23, K2VG"       (Code + Name)
+const MODEL_EXPRS = {
+  name: 'spg.Name',
+  code: 'spg.Code',
+  stock: 'p.PartNumber',
+  'stock-name': "ISNULL(p.PartNumber,'') + ', ' + ISNULL(spg.Name,'')",
+  'code-name': "ISNULL(spg.Code,'') + ', ' + ISNULL(spg.Name,'')",
+};
+const MODEL_EXPR =
+  MODEL_EXPRS[String(process.env.MODEL_MODE || 'name').toLowerCase()] || MODEL_EXPRS.name;
+
 module.exports = {
+  // The model SQL expression, so adapters build the search filter on the SAME value.
+  modelExpr: MODEL_EXPR,
   // SQL Server (Avelon-Yollink MES). Field -> source column:
   //   jtcNo     = Job.OrderNumber       customer    = Customer.Name
   //   partName  = Product.Name          partNo      = Product.PartNumber
-  //   model     = SubProductGroup.Name  date        = Job.CreateDate
+  //   model     = MODEL_EXPR (default stock+name, see top)   date = Job.CreateDate
   //   qty       = Job.Quantity          barcodeId   = Job.Id
   //   empNo     = User.EmployeeNum (via Job.CreatedBy)
   //   stockCode / processCode = Flow (see the ⚠ ASSUMPTIONS on getOne below)
@@ -59,7 +85,7 @@ module.exports = {
         c.Name            AS customer,
         p.Name            AS partName,
         p.PartNumber      AS partNo,
-        spg.Code          AS model,
+        ${MODEL_EXPR}     AS model,
         -- Format the date in SQL (style 103 = dd/mm/yyyy) so it can't be shifted
         -- by JS timezone conversion. CreateDate is a tz-less wall-clock datetime;
         -- the driver would otherwise read it as UTC and a late-afternoon time

@@ -231,10 +231,15 @@ coNo, empNo, stockCode, processCode }`.
   barcode encodes `*j` + Job.Id); `Job.Quantity` → qty; `Job.CreateDate` → date.
 - `Job.CustomerId → Customer.Name` → customer.
 - `Job.ProductId → Product` → partName (`.Name`), partNo (`.PartNumber`);
-  `Product.SubProductGroupId → SubProductGroup.Code` → model. (Uses **Code**, e.g.
-  `E23` for K2VG, `E21` for K0WY — NOT the Name. ⚠ Code is a family, not unique:
-  K0WY and K0WL are both `E21`, so tabs match on Code and two models with the same
-  Code can't be told apart — keep one Code per model tab. See §16/§17.)
+  `Product.SubProductGroupId → SubProductGroup` → model, via **`MODEL_EXPR`** — a
+  single configurable SQL expression (`queries.js` top, swap with `MODEL_MODE` in
+  `.env`; presets: `name`/`code`/`stock`/`stock-name`/`code-name`). **Default `name`**
+  → `SubProductGroup.Name` (e.g. `K2VG`): unique per model AND shared by a welding job
+  and its painting parent (so the scanned welding JTC matches the tab). `code` (`E23`)
+  is a family, NOT unique (K0WY & K0WL both `E21`); `stock`/`stock-name` are
+  product-level so welding (`…-WF`) differs from its painting parent — avoid for
+  weldingToPainting tabs. Whatever the mode, `locations.json` `models` must hold the
+  matching values. See §16/§17.
 - `Job.COItemId → CustomerOrderItem.CustomerOrderId → CustomerOrder.OrderNumber`
   → **coNo** (C/O No).
 - `Job.CreatedBy → [User].EmployeeNum` → empNo.
@@ -291,6 +296,11 @@ drops finished history only; `clearAll()` ("Clear queue", confirm-gated) discard
 the **whole backlog** incl. pending and un-pauses — for when the operator does not
 want to continue. Wording is honest: **"Sent to printer"** (not "Printed"), because
 media-out is invisible to Windows (see §12).
+**`paused` is normalised (2026-08):** a queue with no pending work can't stay paused
+(`normalizePaused()` runs in `remove()`/`clearFinished()`; `clearAll` already
+un-pauses), and the UI only shows **Resume** when `paused && pending.length` — so a
+stray "Resume" can't appear on an idle/empty queue (fixed a bug where clearing/
+removing while paused, or a stale poll, left Resume showing over an "Idle" queue).
 
 **Endpoints:** `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-all}`.
 QR-gated tabs stage in the pending-binding queue first (`/api/binding/*`, §17 Phase 2).
@@ -305,23 +315,29 @@ every terminal**, and each operator picks their tab (remembered in `localStorage
 A tab bundles everything that differs per job:
 
 ```json
-{ "id":"fg-sticker-qc", "name":"P1 FG Sticker (QC)", "templateId":"12",
+{ "id":"fg-sticker-qc", "name":"P1 FG Sticker (QC)", "group":"P1", "templateId":"12",
   "variant":"qc", "barcodeNudge":16 }
 ```
-Optional per-tab overrides: `agentUrl` (default `AGENT_URL`, i.e. the local
-printer — set an address only for a tab that drives another machine's printer),
-`printerType`. Only `id` + `name` are required; the rest fall back to `.env`.
-With no `locations.json`, a single default tab is synthesized from `.env`.
+Optional per-tab overrides: `group` (master-tab category, e.g. `"P1"`/`"P3"`; blank →
+"Other"), `agentUrl` (default `AGENT_URL`, i.e. the local printer — set an address only
+for a tab that drives another machine's printer), `printerType`. Only `id` + `name` are
+required; the rest fall back to `.env`. With no `locations.json`, a single default tab
+is synthesized from `.env`.
 
-Current tabs: **FG Sticker (QC)** → tpl 12, **FG Sticker (Plain)** → tpl 11,
-**Work Order (P3) — K2VG** → tpl 13 (`models:["K2VG"]`), **Work Order (P3) — K0WY**
-→ tpl 16 (`models:["K0WY"]`). `GET /api/locations` feeds the tab bar (agentUrl is
-kept server-side). Every print/preview/model/status/reload call carries
+**Two-level tab bar:** the UI shows **master tabs = the distinct `group`s** (pill row,
+e.g. P1 / P3) above the **destination tabs** for the selected group. Master row hides
+when there's only one group; the sub row hides when a group has a single destination.
+Current tabs: group **P1** — FG Sticker (QC) tpl 12, FG Sticker (Plain) tpl 11; group
+**P3** — Work Order K2VG tpl 13 (`models:["K2VG"]`), Work Order K0WY tpl 16
+(`models:["K0WY"]`), P3 FG Sticker tpl 20. `GET /api/locations` feeds the tab bar
+(carries `id/name/group`; agentUrl kept server-side). Every print/preview/model/status/
+reload call carries
 `?location=<id>` (or in the POST body); the server resolves it to the tab.
 
 Extra per-tab options added 2026-07: `upright:false` (print vertically, as MES
 designed, instead of the default upright rotation — used by the P3 tabs);
-`models:[…]` (SubProductGroup **Codes** this tab auto-prints, e.g. `["E23"]` — see §16).
+`models:[…]` (model values this tab auto-prints — default `SubProductGroup.Name`, e.g.
+`["K2VG"]`; must match the active `MODEL_EXPR`/`MODEL_MODE`, see §7.1/§16).
 
 ---
 
@@ -449,7 +465,8 @@ reprint/fallback. Runs **server-side** — no browser needed (see §18).
   (gitignored). **First run seeds the watermark from the DB's newest completion**
   → history is ignored. **Downtime = catch-up** (persisted watermark resumes);
   delete the state file to re-seed at "now" and skip a backlog.
-- **Routing = model → location.** A completed job's `model` (SubProductGroup.Code)
+- **Routing = model → location.** A completed job's `model` (see §7.1 `MODEL_EXPR`,
+  default `SubProductGroup.Name`)
   matches a location's `models:[…]` list. **This station only prints locations
   named in `.env` `AUTO_PRINT_LOCATIONS`**, so no two stations double-print.
 - **Config (`.env`, per-station):** `AUTO_PRINT_ENABLED` (default false),
@@ -580,8 +597,9 @@ we only force the operator to physically scan both tags before we release OUR la
 - **Model-filtered JTC suggestions:** `/api/jtc/search?q=&location=` now limits the
   suggestion list to the tab's `models` (empty models = no filter), so a workcell
   only surfaces JTCs for the model(s) it prints. mssql builds a bound-param
-  `UPPER(spg.Code) IN (@m0,@m1,…)` clause over `SubProductGroup.Code` (works on all
-  SQL Server versions — no `STRING_SPLIT`); mock filters in JS; postgres ignores it
+  `UPPER(<MODEL_EXPR>) IN (@m0,@m1,…)` clause over the same model expression as the
+  SELECT (§7.1; default `spg.Name`) — no `STRING_SPLIT`, works on all versions;
+  mock filters in JS; postgres ignores it
   (no model column). Same principle as the QR gate — a cell works only
   its own models. (Both the welding and painting JTCs are the same model, e.g.
   K2VG, so the welding JTC the operator scans still appears.)
@@ -592,6 +610,16 @@ we only force the operator to physically scan both tags before we release OUR la
   (tokens ending `:START`/`:END` route to the gate) in `public/app.js` + `index.html`
   + `styles.css`. QR **token values are NOT persisted** — pure unlock, no audit log
   (all label data already exists in the DB).
+
+**Validated end-to-end (2026-08)** including a **real production job-done completion**
+(the live `poll()` path staging into the binding queue), the QR bind + wrong-tag
+reject, wrong-model reject, selectable list, Clear-deselect, release → print queue →
+physical print, plus edge cases (dedup, per-item remove, reprint, restart persistence).
+
+**Optional tweak NOT yet applied (pending user decision):** make `releasePrint()`
+**remove** the item from the binding queue instead of leaving it as a `printed:true`
+"· sent" row — otherwise released rows accumulate in `binding-jobs.json` across
+restarts. Trade-off: loses the binding-row "Reprint" (the print queue still reprints).
 
 **Deferred (future):** more than one job at a time per workcell (needs distinct tag
 sets / per-piece binding).
