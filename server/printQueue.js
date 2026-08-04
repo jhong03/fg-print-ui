@@ -90,6 +90,16 @@ function trimHistory() {
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A paused queue with no pending work has nothing to resume — so it must not stay
+// paused (otherwise the UI shows a stray "Resume" on an idle queue). Call after any
+// removal that can empty the queue. `clearAll` already un-pauses; the worker only
+// runs while un-paused, so completions can't strand this state.
+function normalizePaused() {
+  if (paused && !jobs.some((j) => j.status === 'queued' || j.status === 'printing')) {
+    paused = false;
+  }
+}
+
 // Public snapshot for the UI: never leaks TSPL, just what the operator needs.
 function list() {
   return {
@@ -138,12 +148,14 @@ function resume() {
 
 function remove(id) {
   jobs = jobs.filter((j) => j.id !== Number(id));
+  normalizePaused();
   persist();
 }
 
 // Clear finished history (leaves pending work untouched).
 function clearFinished() {
   jobs = jobs.filter((j) => j.status === 'queued' || j.status === 'printing');
+  normalizePaused();
   persist();
 }
 

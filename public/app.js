@@ -551,7 +551,9 @@ function renderQueue(q) {
     queueBanner.hidden = true;
   }
 
-  resumeBtn.hidden = !q.paused;
+  // Only offer Resume when there's actually a held backlog. A paused-but-empty
+  // queue has nothing to resume (and a stale in-flight poll can't re-show it).
+  resumeBtn.hidden = !(q.paused && pending.length);
   pauseBtn.hidden = q.paused || !pending.length;
   clearQueueBtn.hidden = !q.jobs.some((j) => j.status === 'done' || j.status === 'error');
   // "Clear queue" (discard the whole backlog) only when there's pending work.
