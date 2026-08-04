@@ -126,7 +126,7 @@ async function search(term, models) {
   return RECORDS
     .filter((r) => r.jtcNo.toLowerCase().includes(q))
     .filter((r) => !set || set.has(String(r.model || '').trim().toUpperCase()))
-    .slice(0, 10)
+    .slice(0, 20)
     .map((r) => ({ jtcNo: r.jtcNo, partName: r.partName }));
 }
 

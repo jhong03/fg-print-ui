@@ -124,14 +124,14 @@ module.exports = {
     return {
       // Suggestions list. Matches a typed JTC No OR a scanned barcode (Job.Id),
       // so both surface results. GROUP BY OrderNumber dedupes when several jobs
-      // share a JTC No; TOP 10 keeps the dropdown snappy. Newest job first.
+      // share a JTC No; TOP 20 keeps the dropdown snappy. Newest job first.
       // Suggestions list. `modelClause` is an optional, already-parameterised
       // "AND UPPER(spg.Code) IN (@m0,@m1,…)" the adapter injects when the tab has
       // models — so a workcell surfaces only its own model(s). Built this way (not
       // STRING_SPLIT) to work on older SQL Server compatibility levels too. Empty
       // clause = no filter. The model params themselves are bound by the adapter.
       searchBase: (modelClause = '') => `
-        SELECT TOP 10
+        SELECT TOP 20
           j.OrderNumber AS jtcNo,
           MAX(p.Name)   AS partName
         FROM dbo.Job j
