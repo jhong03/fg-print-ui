@@ -347,7 +347,7 @@ designed, instead of the default upright rotation — used by the P3 tabs);
 |---|---|---|
 | GET | `/api/config` | `{companyName, defaultUom}` |
 | GET | `/api/locations` | Tab list `[{id,name,templateId,variant}]` |
-| GET | `/api/jtc/search?q=&location=` | Suggestions `[{jtcNo, partName}]`, filtered to the tab's `models` |
+| GET | `/api/jtc/search?q=&location=` | Suggestions `[{jtcNo, partName}]` (TOP 20), filtered to the tab's `models`; **empty `q` = recent JTCs** (touchscreen taps the field → dropdown, no keyboard) |
 | GET | `/api/jtc?no=` | Full record for one JTC (query param — JTC Nos contain `/`, spaces) |
 | GET | `/api/label/model?no=&location=` | Geometry for the SVG preview |
 | GET | `/api/print/preview?no=&location=` | Rendered TSPL text (no printing) |
@@ -615,6 +615,13 @@ we only force the operator to physically scan both tags before we release OUR la
 (the live `poll()` path staging into the binding queue), the QR bind + wrong-tag
 reject, wrong-model reject, selectable list, Clear-deselect, release → print queue →
 physical print, plus edge cases (dedup, per-item remove, reprint, restart persistence).
+
+**⏸ NOT YET IN PRODUCTION — go-live blocked on two externals:**
+1. **MES data field** — the MES-side data field this flow depends on is not finished yet.
+2. **Physical QR tags** — the engraved aluminium Green/Start + Red/End tags
+   (`<qrWorkcell>:START` / `:END`, e.g. `K2VG-CELL:START`) must be produced and tested.
+Everything on our side is built and validated with simulated + one real completion; we
+are **waiting on the above before switching the line over**.
 
 **Optional tweak NOT yet applied (pending user decision):** make `releasePrint()`
 **remove** the item from the binding queue instead of leaving it as a `printed:true`

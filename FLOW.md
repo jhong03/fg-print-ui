@@ -3,6 +3,11 @@
 Four parts: **operator steps**, the **full flow**, the **print queue** (how prints
 are held/retried), and the **reload-template mechanism**.
 
+> **⏸ Status (2026-08):** the Welding→Painting QR-binding flow (K2VG tab) is built and
+> validated but **not yet live in production** — waiting on the **MES-side data field**
+> and the **physical engraved QR tags** to be ready for testing. Other tabs (P1/P3
+> stickers, Work Orders without QR) run normally.
+
 ---
 
 ## 1. Simple operator instructions
