@@ -11,7 +11,7 @@
  *
  *   2. GET_ONE — given one exact JTC number, return the full record for the
  *                label. Must return these columns (alias them to match!):
- *                   jtcNo, customer, partName, partNo, model, date, qty, uom, woNo
+ *                   jtcNo, customer, partName, partNo, model, date, qty, uom, woNumber
  *
  * Use the parameter placeholder style for your engine:
  *   - SQL Server (mssql): @jtc   (named parameter)
@@ -51,8 +51,9 @@ module.exports = {
   modelExpr: MODEL_EXPR,
   // SQL Server (Avelon-Yollink MES). Field -> source column:
   //   jtcNo     = Job.OrderNumber       customer    = Customer.Name
-  //   partName  = Product.Name          partNo      = Product.PartNumber
-  //   model     = MODEL_EXPR (default stock+name, see top)   date = Job.CreateDate
+  //   woNumber  = MO.Field1 (via Job.MOId)   partName = Product.Name
+  //   partNo    = Product.Field1        model       = MODEL_EXPR (default, see top)
+  //   date      = Job.CreateDate
   //   qty       = Job.Quantity          barcodeId   = Job.Id
   //   empNo     = User.EmployeeNum (via Job.CreatedBy)
   //   stockCode / processCode = Flow (see the ⚠ ASSUMPTIONS on getOne below)
@@ -82,9 +83,10 @@ module.exports = {
         j.ParentJob       AS parentJobId,
         j.ActualEndDate   AS actualEnd,
         j.OrderNumber     AS jtcNo,
+        mo.Field1         AS woNumber,
         c.Name            AS customer,
         p.Name            AS partName,
-        p.PartNumber      AS partNo,
+        p.Field1          AS partNo,
         ${MODEL_EXPR}     AS model,
         -- Format the date in SQL (style 103 = dd/mm/yyyy) so it can't be shifted
         -- by JS timezone conversion. CreateDate is a tz-less wall-clock datetime;
@@ -113,6 +115,7 @@ module.exports = {
       LEFT JOIN dbo.CustomerOrderItem coi ON coi.Id  = j.COItemId
       LEFT JOIN dbo.CustomerOrder     co  ON co.Id   = coi.CustomerOrderId
       LEFT JOIN dbo.[User]            u   ON u.Id    = j.CreatedBy
+      LEFT JOIN dbo.MO                mo  ON mo.Id   = j.MOId
       OUTER APPLY (
         SELECT COALESCE(
           j.ProductFlowRevId,

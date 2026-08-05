@@ -34,12 +34,12 @@ function mapRecordToFields(r) {
     // Both P1's "JTC No" and P3's "W.O. NO." bind woNumber.
     // ⚠ P3 (template 13) must be rebound coNumber -> woNumber for this, otherwise
     //   its "W.O. NO." would show the C/O No instead of the JTC No.
-    woNumber: jtcNo,
+    woNumber: r.woNumber || '',
     // C/O number = CustomerOrder.OrderNumber — its true catalog meaning.
-    coNumber: r.coNo || '',
+    coNumber: jtcNo,
     // The part NAME / description. P1's "Part Name" and P3's "PART NAME" both
     // bind this key.
-    partName: r.partName || '',
+    partDesc: r.partName || '',
     dateIssue: formatDate(r.date),
     qty: r.qty != null ? String(r.qty) : '',
     jtc_barcodeId: barcode,
@@ -49,7 +49,7 @@ function mapRecordToFields(r) {
     // The catalog has NO dedicated "Part No" key, so feed the part number into a
     // free "Components" slot; bind P1's "Part No" element to remarksLine1. Nothing
     // else binds remarksLine1 (P3 uses remarksLine3/4), so P3 is unaffected.
-    remarksLine1: r.partNo || '',   // P1 "Part No" (Product.PartNumber)
+    partName: r.partNo || '',   // P1 "Part No" (Product.PartNumber)
 
     // Work Order (P3) label fields.
     stockCode: r.stockCode || '',
