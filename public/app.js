@@ -182,6 +182,7 @@ const SCAN_SETTLE_MS = 60; // wait this long for more characters before acceptin
 let pasted = false;
 let burstLen = 0;
 let lastCharAt = 0;
+let suppressTapDropdown = false;   // skip the tap-dropdown during a programmatic focus()
 
 input.addEventListener('paste', () => { pasted = true; });
 
@@ -190,6 +191,7 @@ input.addEventListener('paste', () => { pasted = true; });
 // matches for the current text. (The initial programmatic focus at load runs before
 // these listeners are attached, so it doesn't pop the list.)
 function openSuggestionsOnTap() {
+  if (suppressTapDropdown) return;   // a global-scan focus() — not an operator tap
   const q = input.value.trim();
   input.select();               // select any existing text so a scan/tap replaces it
   if (q) runSearch(q); else showRecent();
@@ -256,6 +258,64 @@ async function acceptScan(q) {
   // wait for the Print Label button.) On a QR tab this stages for binding instead.
   enqueuePrint(record.jtcNo || q, { fromScan: true });
   input.select();   // leave it selected so the next scan replaces it
+}
+
+// ---- Global scan capture (touchscreen kiosks: no keyboard) -----------------
+/*
+ * Operators may tap a button/panel and lose focus on the JTC field, so a scan would
+ * otherwise land nowhere. This routes ANY scan to the right place regardless of what's
+ * focused within the app — but only when the field ISN'T already focused (that path
+ * owns its input, including the device's on-screen keyboard). Only fast bursts
+ * accumulate (a >300ms gap resets the buffer), so slow on-screen typing elsewhere is
+ * ignored. Completion = an Enter terminator OR a burst-then-pause, so either scanner
+ * mode works. Scan chars are swallowed (preventDefault) so they can't stray-trigger a
+ * focused control — JTCs contain spaces, and Space/Enter would "click" a button. This
+ * listener lives on OUR document, so it's inert once focus leaves the app / it closes.
+ * Nothing here touches the server-side job-end auto-print trigger.
+ */
+let scanBuf = '';
+let scanLastAt = 0;
+let scanBufTimer = null;
+const SCAN_RESET_MS = 300;    // a gap bigger than this starts a fresh buffer
+const GLOBAL_SETTLE_MS = 120; // no-Enter scanners: accept after this quiet gap
+
+document.addEventListener('keydown', (e) => {
+  if (document.activeElement === input) return;   // the field owns its own input
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+  const now = performance.now();
+  const gap = now - scanLastAt;
+  scanLastAt = now;
+
+  if (e.key === 'Enter' || e.key === 'Tab') {     // scanner terminators (either kind)
+    if (scanBuf.length >= SCAN_MIN_LEN) { e.preventDefault(); const v = scanBuf; scanBuf = ''; routeGlobalScan(v); }
+    else scanBuf = '';                            // empty buffer -> let Enter/Tab act normally
+    return;
+  }
+  if (e.key.length !== 1) return;                 // Shift, arrows, F-keys, etc.
+
+  if (gap > SCAN_RESET_MS) scanBuf = '';          // too slow to be the same scan
+  scanBuf += e.key;
+  // Once it's clearly a fast burst, swallow keys so the scan can't drive buttons.
+  if (gap < SCAN_GAP_MS && scanBuf.length >= 2) e.preventDefault();
+
+  clearTimeout(scanBufTimer);
+  scanBufTimer = setTimeout(() => {
+    const v = scanBuf; scanBuf = '';
+    if (v.length >= SCAN_MIN_LEN) routeGlobalScan(v);
+  }, GLOBAL_SETTLE_MS);
+});
+
+// A globally-captured scan: a QR tag drives the current tab's binding; a JTC fills the
+// field + loads/queues it — exactly like scanning into the field.
+function routeGlobalScan(v) {
+  const val = v.trim();
+  if (!val) return;
+  if (isQrToken(val)) { bindingScan(val); return; }
+  suppressTapDropdown = true;                 // don't pop the dropdown from focus() below
+  input.focus({ preventScroll: true });
+  input.value = val;
+  acceptScan(val).finally(() => { suppressTapDropdown = false; });
 }
 
 async function runSearch(q) {
@@ -380,6 +440,10 @@ async function selectJtc(jtcNo) {
       renderLabel(record);
       setStatus('');
     }
+    // Keep the loaded JTC SELECTED so the operator's next scan replaces it outright
+    // (no manual Clear) — same as the scan path. Matters most on touchscreens where
+    // the current JTC was picked by tapping a suggestion.
+    input.select();
   } catch (e) {
     showEmpty();
     setStatus(e.message, true);

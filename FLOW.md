@@ -19,7 +19,9 @@ are held/retried), and the **reload-template mechanism**.
    group; the destination row only when a group has more than one tab.)
 3. **Pick the job:**
    - **Scan** the JTC barcode (or paste it) → it loads **and queues to print
-     automatically**, hands-free.
+     automatically**, hands-free. You **don't need to tap the field first** — a scan
+     is captured no matter what's focused on the screen (a QR tag `…:START`/`…:END`
+     is routed to the QR binding instead). Only works while the app is on screen.
    - **Tap the JTC field** (touchscreen, no keyboard) → a dropdown of the **recent
      JTCs for this tab's model** appears; tap one to load it. Typing (if a keyboard
      exists) filters the list live.

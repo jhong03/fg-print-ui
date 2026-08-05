@@ -348,6 +348,12 @@ designed, instead of the default upright rotation — used by the P3 tabs);
 | GET | `/api/config` | `{companyName, defaultUom}` |
 | GET | `/api/locations` | Tab list `[{id,name,templateId,variant}]` |
 | GET | `/api/jtc/search?q=&location=` | Suggestions `[{jtcNo, partName}]` (TOP 20), filtered to the tab's `models`; **empty `q` = recent JTCs** (touchscreen taps the field → dropdown, no keyboard) |
+<!-- Frontend note: a document-wide keydown capture (public/app.js `routeGlobalScan`)
+     routes a scan anywhere in the app to the JTC field (or QR binding for `:START`/`:END`)
+     without focusing the field first — fast-burst only, defers to the field when it's
+     focused, swallows scan chars so they can't trigger buttons. Inert once focus leaves
+     the app. Does NOT affect the server-side auto-print trigger. -->
+
 | GET | `/api/jtc?no=` | Full record for one JTC (query param — JTC Nos contain `/`, spaces) |
 | GET | `/api/label/model?no=&location=` | Geometry for the SVG preview |
 | GET | `/api/print/preview?no=&location=` | Rendered TSPL text (no printing) |
@@ -662,3 +668,32 @@ Vite + MUI SPA, `ejtc-reactjs`, served over **HTTP** at e.g.
 - **Data note (not a bug):** `model` and `C/O No` are **not** mutually exclusive
   (2204 jobs have both); blank C/O = make-to-stock jobs with no `CustomerOrder`;
   the `CustomerOrderItem→CustomerOrder` join is clean (0 orphans).
+
+---
+
+## 20. Operator input — touchscreen + scanner (BUILT — 2026-08)
+
+Workcells are **touchscreen only (no keyboard)**, so input is scanner-first with tap
+fallbacks. All frontend (`public/app.js`); none of it affects the auto-print trigger.
+
+- **Master tabs (groups).** Two-level tab bar — pill row of `group`s (P1/P3) above the
+  destination tabs (see §10). `group` per location in `locations.json`.
+- **Tap-to-open dropdown.** Tapping the JTC field opens suggestions — **recent JTCs for
+  the tab's model** when empty (`/api/jtc/search` with empty `q`), or matches while
+  typing. **TOP 20**. So an operator can pick a job with no keyboard.
+- **Auto-replace on next scan.** After any JTC loads (scan, tap, Enter) the field text is
+  left **selected**, so the next scan overwrites it — no manual Clear needed.
+- **Global scan capture** (`routeGlobalScan` + a document `keydown` listener). A scan is
+  routed no matter what's focused in the app: a QR tag (`…:START`/`…:END`) → the current
+  tab's **binding**; otherwise → **fills the field + loads/queues**. Fast-burst only
+  (>300 ms gap resets), **defers to the field when it's focused** (so the device's
+  on-screen keyboard isn't hijacked), completes on **Enter/Tab or a burst-pause** (either
+  scanner mode), and **swallows scan chars** so spaces/Enter can't click a focused button.
+  **Inert once focus leaves the app / it closes.** Verified via a console `simScan()`
+  burst; real-scanner timing tunable via `SCAN_RESET_MS` / `GLOBAL_SETTLE_MS`.
+- **Model key is configurable** (§7.1): one `MODEL_EXPR` (env `MODEL_MODE`), **default
+  `name` = `SubProductGroup.Name`** (K2VG) — shared by welding + painting, collision-free.
+- **Queue Resume fix.** `Resume` shows only with a real backlog (`paused && pending`);
+  `normalizePaused()` un-pauses an emptied queue — no stray Resume on an idle queue.
+
+Frontend cache-busted via `?v=N` on the script tags in `index.html` (currently v10).
