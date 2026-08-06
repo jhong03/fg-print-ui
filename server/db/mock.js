@@ -118,7 +118,7 @@ const RECORDS = [
   },
 ];
 
-async function search(term, models) {
+async function search(term, models, doneOnly) {
   const q = term.toLowerCase();
   // Model filter mirrors mssql: when the calling tab has models, only its models
   // surface. Empty/absent = all.
@@ -128,6 +128,7 @@ async function search(term, models) {
   return RECORDS
     .filter((r) => r.jtcNo.toLowerCase().includes(q))
     .filter((r) => !set || set.has(String(r.model || '').trim().toUpperCase()))
+    .filter((r) => !doneOnly || r.actualEnd)   // FG-Sticker tabs: completed jobs only
     .slice(0, 20)
     .map((r) => ({ jtcNo: r.jtcNo, partName: r.partName }));
 }

@@ -133,7 +133,9 @@ module.exports = {
       // models — so a workcell surfaces only its own model(s). Built this way (not
       // STRING_SPLIT) to work on older SQL Server compatibility levels too. Empty
       // clause = no filter. The model params themselves are bound by the adapter.
-      searchBase: (modelClause = '') => `
+      // `doneClause` (also from the adapter) is "AND j.ActualEndDate IS NOT NULL" for
+      // FG-Sticker (doneOnly) tabs — so only finished jobs surface. Empty otherwise.
+      searchBase: (modelClause = '', doneClause = '') => `
         SELECT TOP 20
           j.OrderNumber AS jtcNo,
           MAX(p.Name)   AS partName
@@ -142,6 +144,7 @@ module.exports = {
         LEFT JOIN dbo.SubProductGroup spg ON spg.Id = p.SubProductGroupId
         WHERE (j.OrderNumber LIKE @jtc OR CAST(j.Id AS varchar(20)) LIKE @jtc)
           ${modelClause}
+          ${doneClause}
         GROUP BY j.OrderNumber
         ORDER BY MAX(j.Id) DESC
       `,

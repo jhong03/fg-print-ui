@@ -52,7 +52,9 @@ pulls the latest design from MES (see §4). **Clear done** removes finished hist
 **Look up:** type/scan → `GET /api/jtc/search` (SQL Server) → select/scan →
 `GET /api/jtc?no=` → record → on-screen SVG preview (`/api/label/model`).
 Suggestions are **filtered to the tab's `models`** (a workcell only sees its own
-model's JTCs; tabs with no `models` list show everything).
+model's JTCs; tabs with no `models` list show everything). **FG-Sticker tabs
+(`doneOnly`) additionally show and print only COMPLETED jobs** (`ActualEndDate` set) —
+a not-finished job is rejected at `/api/print` (HTTP 409) even if scanned directly.
 
 **Print:** `POST /api/print {jtcNo, location}` **enqueues**. The queue worker maps
 the record to MES field keys → renders TSPL → `POST :9000/print-label` to that

@@ -67,7 +67,9 @@ function getPool() {
 // limited to JTCs of those models (the calling tab's `models`). Empty/absent = all.
 // The IN list is built as bound params (@m0, @m1, …) so it stays injection-safe and
 // works on every SQL Server version (no STRING_SPLIT dependency).
-async function search(term, models) {
+// `doneOnly` (optional): when true, only completed jobs (ActualEndDate set) surface —
+// for FG-Sticker tabs. No parameter needed; it's a fixed, safe clause.
+async function search(term, models, doneOnly) {
   const pool = await getPool();
   const req = pool.request().input('jtc', `%${term}%`);
   const list = Array.isArray(models) ? models.filter(Boolean) : [];
@@ -79,7 +81,8 @@ async function search(term, models) {
     });
     modelClause = `AND UPPER(${MODEL_EXPR}) IN (${params.join(', ')})`;
   }
-  const result = await req.query(sql.searchBase(modelClause));
+  const doneClause = doneOnly ? 'AND j.ActualEndDate IS NOT NULL' : '';
+  const result = await req.query(sql.searchBase(modelClause, doneClause));
   return result.recordset;
 }
 

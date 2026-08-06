@@ -73,8 +73,10 @@ app.get('/api/jtc/search', async (req, res) => {
   try {
     // Empty q is allowed: it returns the most RECENT JTCs for the tab's model, so a
     // touchscreen operator (no keyboard) can tap one from the dropdown. Non-empty q
-    // filters as usual. Either way, limited to the tab's models (empty list = all).
-    const rows = await db.search(q, resolveLocation(req).models);
+    // filters as usual. Limited to the tab's models (empty list = all), and — on
+    // FG-Sticker (doneOnly) tabs — to completed jobs only.
+    const loc = resolveLocation(req);
+    const rows = await db.search(q, loc.models, loc.doneOnly);
     res.json(rows);
   } catch (err) {
     console.error('[search]', err.message);
@@ -168,6 +170,14 @@ app.post('/api/print', async (req, res) => {
           wrongModel: true,
         });
       }
+    }
+    // Done guard: FG-Sticker (doneOnly) tabs only print COMPLETED jobs (ActualEndDate
+    // set). A scan bypasses the done-filtered search, so this is the real enforcement.
+    if (record && loc.doneOnly && !record.actualEnd) {
+      return res.status(409).json({
+        error: `JTC ${record.jtcNo} is not finished yet — this tab only prints completed jobs.`,
+        notDone: true,
+      });
     }
     if (record) {
       const t = await resolvePainting(record, loc, db);

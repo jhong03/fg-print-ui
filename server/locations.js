@@ -97,6 +97,10 @@ function resolveEntry(entry, d) {
   // Master-tab grouping: a category label so the UI can bucket locations (e.g. "P1",
   // "P3"). Blank falls back to "Other" in the UI.
   const group = String(entry.group || '').trim();
+  // FG Sticker tabs: only completed jobs (Job.ActualEndDate set) may be searched or
+  // printed — you only sticker a finished good. Enforced in the search filter AND at
+  // /api/print (a scanned barcode can't bypass it). See queries.js + index.js.
+  const doneOnly = entry.doneOnly === true;
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
@@ -112,6 +116,7 @@ function resolveEntry(entry, d) {
     processCodePrepend,
     requireQrBinding,
     qrWorkcell,
+    doneOnly,
   };
 }
 

@@ -319,10 +319,12 @@ A tab bundles everything that differs per job:
   "variant":"qc", "barcodeNudge":16 }
 ```
 Optional per-tab overrides: `group` (master-tab category, e.g. `"P1"`/`"P3"`; blank →
-"Other"), `agentUrl` (default `AGENT_URL`, i.e. the local printer — set an address only
-for a tab that drives another machine's printer), `printerType`. Only `id` + `name` are
-required; the rest fall back to `.env`. With no `locations.json`, a single default tab
-is synthesized from `.env`.
+"Other"), `doneOnly` (FG-Sticker tabs: only **completed** jobs — `Job.ActualEndDate` set
+— may be searched or printed; enforced in the JTC-suggestion filter AND `/api/print`, so
+a scanned barcode can't bypass it → HTTP 409 `{notDone}`), `agentUrl` (default
+`AGENT_URL`, i.e. the local printer — set an address only for a tab that drives another
+machine's printer), `printerType`. Only `id` + `name` are required; the rest fall back to
+`.env`. With no `locations.json`, a single default tab is synthesized from `.env`.
 
 **Two-level tab bar:** the UI shows **master tabs = the distinct `group`s** (pill row,
 e.g. P1 / P3) above the **destination tabs** for the selected group. Master row hides

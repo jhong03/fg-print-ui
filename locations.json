@@ -6,7 +6,8 @@
     "templateId": "12",
     "variant": "qc",
     "barcodeNudge": 16,
-    "models": []
+    "models": [],
+    "doneOnly": true
   },
   {
     "id": "fg-sticker-plain",
@@ -15,7 +16,8 @@
     "templateId": "11",
     "variant": "plain",
     "barcodeNudge": 72,
-    "models": []
+    "models": [],
+    "doneOnly": true
   },
   {
     "id": "work-order-p3-k2vg",
@@ -48,6 +50,7 @@
     "templateId": "20",
     "variant": "plain",
     "barcodeNudge": 72,
-    "models": []
+    "models": [],
+    "doneOnly": true
   }
 ]
