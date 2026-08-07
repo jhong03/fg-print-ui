@@ -101,6 +101,9 @@ function resolveEntry(entry, d) {
   // printed — you only sticker a finished good. Enforced in the search filter AND at
   // /api/print (a scanned barcode can't bypass it). See queries.js + index.js.
   const doneOnly = entry.doneOnly === true;
+  // Pin a tab to one stock location: only jobs whose Job.ToLocationId equals this
+  // surface / print (e.g. 18 = P3-OUTGOING for the P3 FG label). null = no filter.
+  const toLocation = Number.isInteger(entry.toLocation) ? entry.toLocation : null;
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
@@ -117,6 +120,7 @@ function resolveEntry(entry, d) {
     requireQrBinding,
     qrWorkcell,
     doneOnly,
+    toLocation,
   };
 }
 

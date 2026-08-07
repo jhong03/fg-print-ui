@@ -40,8 +40,15 @@ const MODEL_EXPRS = {
   name: 'spg.Name',
   code: 'spg.Code',
   stock: 'p.PartNumber',
-  'stock-name': "ISNULL(p.PartNumber,'') + ', ' + ISNULL(spg.Name,'')",
-  'code-name': "ISNULL(spg.Code,'') + ', ' + ISNULL(spg.Name,'')",
+  // Comma only when BOTH sides present — no stray ", " when the model name is missing.
+  'stock-name':
+    "CASE WHEN NULLIF(LTRIM(RTRIM(p.PartNumber)),'') IS NULL THEN ISNULL(spg.Name,'')" +
+    " WHEN NULLIF(LTRIM(RTRIM(spg.Name)),'') IS NULL THEN p.PartNumber" +
+    " ELSE p.PartNumber + ', ' + spg.Name END",
+  'code-name':
+    "CASE WHEN NULLIF(LTRIM(RTRIM(spg.Code)),'') IS NULL THEN ISNULL(spg.Name,'')" +
+    " WHEN NULLIF(LTRIM(RTRIM(spg.Name)),'') IS NULL THEN spg.Code" +
+    " ELSE spg.Code + ', ' + spg.Name END",
 };
 const MODEL_EXPR =
   MODEL_EXPRS[String(process.env.MODEL_MODE || 'name').toLowerCase()] || MODEL_EXPRS.name;
@@ -81,6 +88,7 @@ module.exports = {
     const COLS = `
         j.Id              AS jobId,
         j.ParentJob       AS parentJobId,
+        j.ToLocationId    AS toLocationId,
         j.ActualEndDate   AS actualEnd,
         j.OrderNumber     AS jtcNo,
         mo.Field1         AS woNumber,
@@ -89,11 +97,12 @@ module.exports = {
         p.Field1          AS partNo,
         ${MODEL_EXPR}     AS model,
         -- Format the date in SQL (style 103 = dd/mm/yyyy) so it can't be shifted
-        -- by JS timezone conversion. CreateDate is a tz-less wall-clock datetime;
-        -- the driver would otherwise read it as UTC and a late-afternoon time
-        -- would roll to the next day when rendered in local (+8) time.
-        CONVERT(varchar(10), j.CreateDate, 103) AS date,
-        j.Quantity        AS qty,
+        -- by JS timezone conversion (tz-less wall-clock datetime; driver would read
+        -- it as UTC and a late-afternoon time would roll to the next day in +8).
+        -- ActualEndDate = job completion. NULL for unfinished jobs -> blank date, a
+        -- second visual gate on top of the doneOnly / location print guards.
+        CONVERT(varchar(10), j.ActualEndDate, 103) AS date,
+        j.QuantityCompleted        AS qty,
         co.OrderNumber    AS coNo,
         j.Id              AS barcodeId,
         u.EmployeeNum     AS empNo,
@@ -135,7 +144,9 @@ module.exports = {
       // clause = no filter. The model params themselves are bound by the adapter.
       // `doneClause` (also from the adapter) is "AND j.ActualEndDate IS NOT NULL" for
       // FG-Sticker (doneOnly) tabs — so only finished jobs surface. Empty otherwise.
-      searchBase: (modelClause = '', doneClause = '') => `
+      // `locClause` (from the adapter) is "AND j.ToLocationId = @toloc" for tabs
+      // pinned to a stock location (e.g. P3 FG = 18, P3-OUTGOING). Empty otherwise.
+      searchBase: (modelClause = '', doneClause = '', locClause = '') => `
         SELECT TOP 20
           j.OrderNumber AS jtcNo,
           MAX(p.Name)   AS partName
@@ -145,6 +156,7 @@ module.exports = {
         WHERE (j.OrderNumber LIKE @jtc OR CAST(j.Id AS varchar(20)) LIKE @jtc)
           ${modelClause}
           ${doneClause}
+          ${locClause}
         GROUP BY j.OrderNumber
         ORDER BY MAX(j.Id) DESC
       `,
@@ -156,7 +168,8 @@ module.exports = {
         SELECT TOP 1 ${COLS}
         ${FROM}
         WHERE LTRIM(RTRIM(j.OrderNumber)) = LTRIM(RTRIM(@jtc))
-           OR j.Id = TRY_CONVERT(int, @jtc)
+           OR j.Id = TRY_CONVERT(int,
+                CASE WHEN @jtc LIKE '[*][jJ]%' THEN STUFF(@jtc, 1, 2, '') ELSE @jtc END)
         ORDER BY j.Id DESC
       `,
       // Auto-print watcher: every job that COMPLETED (ActualEndDate set) strictly

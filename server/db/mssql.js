@@ -69,7 +69,8 @@ function getPool() {
 // works on every SQL Server version (no STRING_SPLIT dependency).
 // `doneOnly` (optional): when true, only completed jobs (ActualEndDate set) surface —
 // for FG-Sticker tabs. No parameter needed; it's a fixed, safe clause.
-async function search(term, models, doneOnly) {
+// `toLocation` (optional): a Job.ToLocationId to pin the tab to (e.g. 18 = P3-OUTGOING).
+async function search(term, models, doneOnly, toLocation) {
   const pool = await getPool();
   const req = pool.request().input('jtc', `%${term}%`);
   const list = Array.isArray(models) ? models.filter(Boolean) : [];
@@ -82,7 +83,12 @@ async function search(term, models, doneOnly) {
     modelClause = `AND UPPER(${MODEL_EXPR}) IN (${params.join(', ')})`;
   }
   const doneClause = doneOnly ? 'AND j.ActualEndDate IS NOT NULL' : '';
-  const result = await req.query(sql.searchBase(modelClause, doneClause));
+  let locClause = '';
+  if (Number.isInteger(toLocation)) {
+    req.input('toloc', toLocation);
+    locClause = 'AND j.ToLocationId = @toloc';
+  }
+  const result = await req.query(sql.searchBase(modelClause, doneClause, locClause));
   return result.recordset;
 }
 

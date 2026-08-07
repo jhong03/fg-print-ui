@@ -185,6 +185,33 @@ function renderElement(el, values, elements, barcodeNudge = 0, U = null) {
   }
 }
 
+/*
+ * Collapse the "stock code, model name" row into ONE element so it flows.
+ *
+ * Some templates place three fixed elements on that row: the `stockCode` field, a
+ * static "," and the `model` field. Fixed X means a stray comma when the model name
+ * is empty, and overlap when the stock code is long. We merge them: the stockCode
+ * element carries `stock, model` (comma only when BOTH present), and the static comma
+ * + model element are dropped. Only fires when both fields sit at the same X (same
+ * row); otherwise the template is left untouched.
+ */
+function collapseModelRow(elements, values) {
+  const S = elements.find((e) => e.type === 'text' && e.value?.kind === 'field' && e.value.field === 'stockCode');
+  const M = elements.find((e) => e.type === 'text' && e.value?.kind === 'field' && e.value.field === 'model');
+  if (!S || !M || S.x !== M.x) return { elements, values };
+  const stock = String(values.stockCode ?? '').trim();
+  const model = String(values.model ?? '').trim();
+  const combined = stock && model ? `${stock}, ${model}` : (stock || model);
+  const isComma = (e) => e.type === 'text' && e.value?.kind === 'static' && /^\s*,\s*$/.test(e.value.text || '');
+  const drop = new Set([M]);
+  const C = elements.find((e) => e !== S && e.x === S.x && isComma(e));
+  if (C) drop.add(C);
+  return {
+    elements: elements.filter((e) => !drop.has(e)),
+    values: { ...values, stockCode: combined },
+  };
+}
+
 function renderTspl(template, values = {}, opts = {}) {
   const L = template.label || {};
   const barcodeNudge = opts.barcodeNudge != null
@@ -194,7 +221,8 @@ function renderTspl(template, values = {}, opts = {}) {
 
   // Drop the QC CHOP block first, so wrapping and barcode centring both see
   // the label as it will actually print.
-  const elements = applyVariant(template.elements || [], opts.variant);
+  const variantEls = applyVariant(template.elements || [], opts.variant);
+  const { elements, values: vals } = collapseModelRow(variantEls, values);
   const heightDots = Math.round((L.heightMm || 0) * (L.dpi || 203) / 25.4);
   // Most templates are designed sideways and turned upright to print top-down.
   // A tab can opt out (upright:false) to print exactly as MES designed it — e.g.
@@ -213,9 +241,9 @@ function renderTspl(template, values = {}, opts = {}) {
   lines.push('OFFSET 0');
 
   // Wrap against where things actually land, not where the template put them.
-  const placed = placedElements(elements, values);
+  const placed = placedElements(elements, vals);
   for (const el of elements) {
-    for (const line of renderElement(el, values, placed, barcodeNudge, U)) lines.push(line);
+    for (const line of renderElement(el, vals, placed, barcodeNudge, U)) lines.push(line);
   }
 
   lines.push('PRINT 1,1');
@@ -223,4 +251,4 @@ function renderTspl(template, values = {}, opts = {}) {
   return lines.join('\n') + '\n';
 }
 
-module.exports = { renderTspl, resolveValue, placedElements, applyVariant };
+module.exports = { renderTspl, resolveValue, placedElements, applyVariant, collapseModelRow };

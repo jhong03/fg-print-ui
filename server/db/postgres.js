@@ -38,7 +38,7 @@ function getPool() {
 
 // `models`/`doneOnly` accepted for a uniform adapter signature but ignored here —
 // the legacy Postgres snapshot has no model / completion column to filter on.
-async function search(term, _models, _doneOnly) {
+async function search(term, _models, _doneOnly, _toLocation) {
   const { rows } = await getPool().query(sql.search, [`%${term}%`]);
   return rows;
 }

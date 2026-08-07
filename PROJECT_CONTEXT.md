@@ -321,7 +321,9 @@ A tab bundles everything that differs per job:
 Optional per-tab overrides: `group` (master-tab category, e.g. `"P1"`/`"P3"`; blank →
 "Other"), `doneOnly` (FG-Sticker tabs: only **completed** jobs — `Job.ActualEndDate` set
 — may be searched or printed; enforced in the JTC-suggestion filter AND `/api/print`, so
-a scanned barcode can't bypass it → HTTP 409 `{notDone}`), `agentUrl` (default
+a scanned barcode can't bypass it → HTTP 409 `{notDone}`), `toLocation` (pin the tab
+to one `Job.ToLocationId` — e.g. `18` = P3-OUTGOING for `p3-fg-sticker`; search filter
++ `/api/print` guard → 409 `{wrongLocation}`), `agentUrl` (default
 `AGENT_URL`, i.e. the local printer — set an address only for a tab that drives another
 machine's printer), `printerType`. Only `id` + `name` are required; the rest fall back to
 `.env`. With no `locations.json`, a single default tab is synthesized from `.env`.

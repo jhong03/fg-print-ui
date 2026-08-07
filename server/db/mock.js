@@ -20,6 +20,7 @@ const RECORDS = [
     uom: 'PCS',
     woNumber: 'WO-2026-0193',
     barcodeId: '2606593021',
+    toLocationId: 18,
     actualEnd: '2026-07-27T09:00:00Z',
   },
   {
@@ -33,6 +34,7 @@ const RECORDS = [
     qty: 200,
     uom: 'PCS',
     woNumber: 'WO-2026-0207',
+    toLocationId: 19,
     actualEnd: '2026-07-27T09:05:00Z',
   },
   {
@@ -118,7 +120,7 @@ const RECORDS = [
   },
 ];
 
-async function search(term, models, doneOnly) {
+async function search(term, models, doneOnly, toLocation) {
   const q = term.toLowerCase();
   // Model filter mirrors mssql: when the calling tab has models, only its models
   // surface. Empty/absent = all.
@@ -129,6 +131,7 @@ async function search(term, models, doneOnly) {
     .filter((r) => r.jtcNo.toLowerCase().includes(q))
     .filter((r) => !set || set.has(String(r.model || '').trim().toUpperCase()))
     .filter((r) => !doneOnly || r.actualEnd)   // FG-Sticker tabs: completed jobs only
+    .filter((r) => !Number.isInteger(toLocation) || r.toLocationId === toLocation)
     .slice(0, 20)
     .map((r) => ({ jtcNo: r.jtcNo, partName: r.partName }));
 }
@@ -136,7 +139,9 @@ async function search(term, models, doneOnly) {
 // Matches the JTC No (OrderNumber) OR the Job.Id, like the real mssql getOne —
 // so resolving a ParentJob by id (welding->painting) works here too.
 async function getOne(key) {
-  return RECORDS.find((r) => r.jtcNo === key || String(r.jobId) === String(key)) || null;
+  // Scanned FG barcode = "*j" + Job.Id (e.g. "*j91001") — strip the prefix for the id match.
+  const id = String(key).replace(/^\*[jJ]/, '');
+  return RECORDS.find((r) => r.jtcNo === key || String(r.jobId) === id) || null;
 }
 
 // Auto-print watcher support. `since` is a Date; return completions strictly

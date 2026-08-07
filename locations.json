@@ -51,6 +51,7 @@
     "variant": "plain",
     "barcodeNudge": 72,
     "models": [],
-    "doneOnly": true
+    "doneOnly": true,
+    "toLocation": 18
   }
 ]

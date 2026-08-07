@@ -76,7 +76,7 @@ app.get('/api/jtc/search', async (req, res) => {
     // filters as usual. Limited to the tab's models (empty list = all), and — on
     // FG-Sticker (doneOnly) tabs — to completed jobs only.
     const loc = resolveLocation(req);
-    const rows = await db.search(q, loc.models, loc.doneOnly);
+    const rows = await db.search(q, loc.models, loc.doneOnly, loc.toLocation);
     res.json(rows);
   } catch (err) {
     console.error('[search]', err.message);
@@ -177,6 +177,13 @@ app.post('/api/print', async (req, res) => {
       return res.status(409).json({
         error: `JTC ${record.jtcNo} is not finished yet — this tab only prints completed jobs.`,
         notDone: true,
+      });
+    }
+    // Location guard: a tab pinned to a stock location prints only jobs at it.
+    if (record && loc.toLocation != null && record.toLocationId !== loc.toLocation) {
+      return res.status(409).json({
+        error: `JTC ${record.jtcNo} is not at this tab's location (${loc.toLocation}) — cannot print here.`,
+        wrongLocation: true,
       });
     }
     if (record) {
