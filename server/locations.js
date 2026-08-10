@@ -84,8 +84,8 @@ function resolveEntry(entry, d) {
   // QR binding gate: when true, a completed/entered job on this tab does NOT print
   // directly — it goes to the PENDING-BINDING queue and only reaches the print
   // queue after the operator scans this workcell's Green (Start) + Red (End) QR
-  // tags. `qrWorkcell` is the token engraved into both tags; the expected scans are
-  // `<qrWorkcell>:START` and `<qrWorkcell>:END`. See bindingQueue.js + §17.
+  // tags. `qrWorkcell` is this station's workcell NUMBER; tags are 4-digit "WDSS"
+  // (W=workcell, D=1 Start/2 End, SS=sequence, Start/End share SS). See bindingQueue.js.
   const requireQrBinding = entry.requireQrBinding === true;
   const qrWorkcell = String(entry.qrWorkcell || '').trim();
   // Welding->Painting only: a process code to PREPEND to the painting label's

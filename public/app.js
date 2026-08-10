@@ -234,7 +234,7 @@ input.addEventListener('input', (e) => {
  * to the suggestion list rather than showing a "not found" dead end.
  */
 async function acceptScan(q) {
-  // A scanned QR TAG (…:START / …:END) is a binding scan, not a JTC lookup —
+  // A scanned QR TAG (bare 4-digit WDSS) is a binding scan, not a JTC lookup —
   // route it to the QR gate and clear the box for the next scan.
   if (isQrToken(q)) { bindingScan(q); input.value = ''; input.focus(); return; }
   if (input.value.trim() !== q) return;   // superseded while we waited
@@ -812,15 +812,20 @@ setInterval(refreshAuto, 5000);
  * scan) and shown here as a task-list. The operator scans this workcell's Green
  * (Start) and Red (End) engraved QR tags; only when both validate does the label
  * go to the print queue. A wrong/other-workcell tag is rejected (no lockout).
- * QR tags scan as `<workcell>:START` / `:END`, which the scan handlers route here.
+ * QR tags scan as a bare 4-digit number `WDSS` (W=workcell, D=1 Start/2 End,
+ * SS=sequence; Start/End must share SS), which the scan handlers route here.
  */
 const bindingPanel = document.getElementById('bindingPanel');
 const bindingList = document.getElementById('bindingList');
 const bindingState = document.getElementById('bindingState');
 const bindingError = document.getElementById('bindingError');
 
-const QR_TOKEN_RE = /:(START|END)\s*$/i;
-function isQrToken(v) { return QR_TOKEN_RE.test(String(v || '').trim()); }
+// A QR workcell tag is a bare 4-digit number (WDSS). It only MEANS a binding scan
+// on a QR-gated tab — elsewhere 4 digits are just a normal search term.
+const QR_TOKEN_RE = /^\d{4}$/;
+function isQrToken(v) {
+  return !!currentLocation?.requireQrBinding && QR_TOKEN_RE.test(String(v || '').trim());
+}
 
 let bindingReleasing = false; // guards the one-shot auto-release on full binding
 let selectedBindingId = null; // which staged item the preview + scan + print target
@@ -925,7 +930,17 @@ function renderBinding(jobs) {
     if (isSel) {
       const tasks = document.createElement('div');
       tasks.className = 'b-tasks';
-      tasks.append(taskPill('green', 'Green · Start', j.boundStart), taskPill('red', 'Red · End', j.boundEnd));
+      // Expected tag under each pill. Before any scan it's generic (21xx / 22xx);
+      // once EITHER tag is scanned its sequence is locked, so show the exact partner
+      // (scan 2101 -> End expected becomes 2201).
+      const wc = currentLocation?.qrWorkcell || '';
+      const locked = j.startSeq || j.endSeq || null;
+      const startExp = wc ? wc + '1' + (j.startSeq || locked || 'xx') : '';
+      const endExp = wc ? wc + '2' + (j.endSeq || locked || 'xx') : '';
+      tasks.append(
+        taskPill('green', 'Green · Start', j.boundStart, startExp && ('expect ' + startExp)),
+        taskPill('red', 'Red · End', j.boundEnd, endExp && ('expect ' + endExp))
+      );
       li.insertBefore(tasks, rm);
     }
     bindingList.appendChild(li);
@@ -939,10 +954,18 @@ function renderBinding(jobs) {
   }
 }
 
-function taskPill(colour, text, done) {
+function taskPill(colour, text, done, hint) {
   const s = document.createElement('span');
   s.className = 'b-pill b-pill--' + colour + (done ? ' b-pill--done' : '');
-  s.textContent = (done ? '☑ ' : '☐ ') + text;
+  const label = document.createElement('span');
+  label.textContent = (done ? '☑ ' : '☐ ') + text;
+  s.appendChild(label);
+  if (hint) {
+    const h = document.createElement('small');
+    h.className = 'b-pill-exp';
+    h.textContent = hint;
+    s.appendChild(h);
+  }
   return s;
 }
 

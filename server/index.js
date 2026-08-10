@@ -63,6 +63,8 @@ app.get('/api/locations', (req, res) => {
       variant: l.variant,
       // Tells the UI this tab gates printing behind a QR scan (task-list flow).
       requireQrBinding: l.requireQrBinding,
+      // The workcell number, so the UI can show the expected tag (e.g. 21xx/22xx).
+      qrWorkcell: l.qrWorkcell,
     }))
   );
 });
@@ -237,9 +239,9 @@ app.post('/api/binding/scan', (req, res) => {
 });
 // Release the selected item to the print queue — the gated print. Fails unless both
 // tags are bound (no bypass). Returns the binding list so the UI stays in sync.
-app.post('/api/binding/print', (req, res) => {
+app.post('/api/binding/print', async (req, res) => {
   const loc = resolveLocation(req);
-  const r = bindingQueue.releasePrint(loc.id, req.body?.id);
+  const r = await bindingQueue.releasePrint(loc.id, req.body?.id);
   res.json({ ...r, jobs: bindingQueue.list(loc.id) });
 });
 app.post('/api/binding/remove', (req, res) => {

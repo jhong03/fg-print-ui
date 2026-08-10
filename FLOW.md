@@ -29,9 +29,12 @@ are held/retried), and the **reload-template mechanism**.
      JTC** shows its **Painting Line** label (its next process). A note under the
      preview says *"Showing Painting Line label … — from Welding JTC …"*.
    - **This tab is QR-gated:** the label does **not** print yet. A task-list appears
-     (☐ **Green/Start** ☐ **Red/End**). **Scan this workcell's two engraved QR
-     tags** — only when both bind does the Work Order label go to the print queue.
-     A wrong or swapped tag is rejected on the spot; just scan the correct one. The
+     (☐ **Green/Start** ☐ **Red/End**), each showing the **expected tag** (e.g.
+     `expect 21xx` / `expect 22xx`). **Scan this workcell's two engraved QR tags**
+     — once you scan one, the other's expected number pins to the same sequence
+     (scan `2101` → End shows `expect 2201`). Only when both bind does the Work
+     Order label go to the print queue. A wrong workcell, wrong format, or a
+     mismatched-sequence tag is rejected on the spot; just scan the correct one. The
      **Print label** button stays disabled until both are scanned (no bypass).
 4. **Watch the Print queue** at the bottom: each job shows its `#`order, JTC No
    (with a `↳ from <welding JTC>` line when it came from a welding job), label type,
@@ -118,8 +121,15 @@ Endpoints: `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-a
 **QR binding gate (P3 Work Order tab):** on a `requireQrBinding` tab the job is held
 in a **pending-binding queue** first — `GET /api/binding`,
 `POST /api/binding/{scan|print|remove|clear}` — and only moves to the print queue
-above once both this workcell's Green (`<qrWorkcell>:START`) and Red
-(`<qrWorkcell>:END`) tags are scanned and validated. See PROJECT_CONTEXT §17 (Phase 2).
+above once both this workcell's Green (Start) and Red (End) tags are scanned and
+validated. Each tag is a 4-digit number `WDSS`: `W` = workcell number (must equal
+the tab's `qrWorkcell`), `D` = `1` Start / `2` End, `SS` = sequence. A Start/End
+**pair shares the same `SS`** (e.g. `2101` + `2201`); a wrong workcell, unknown
+format, or mismatched sequence is rejected on the spot. On release the bind is
+logged to a **PostgreSQL** table `public.qr_jtc_link` (printed painting `Job.Id`
+→ `jtc_barcodeId`, plus `qr_start`/`qr_end`) via `server/qrLink.js` — a separate
+pool from the mssql read DB, best-effort (never blocks the print). See
+PROJECT_CONTEXT §17 (Phase 2).
 
 ---
 
@@ -153,9 +163,10 @@ Global defaults + secrets in `.env`; per-tab template/variant/calibration in
 | `.env` | `AGENT_URL` / `PRINTER_TYPE` | Default print-agent + type |
 | `.env` | `DB_CLIENT` + `MSSQL_*` | Active DB (SQL Server) |
 | `.env` | `MODEL_MODE` | Model expression (default `name` = SubProductGroup.Name) |
+| `.env` | `QRPG_*` (or `PG_*`) | Postgres conn for the `qr_jtc_link` bind log (HOST/PORT/DATABASE/USER/PASSWORD/SSL) |
 | `locations.json` | `templateId` / `variant` / `barcodeNudge` / `agentUrl` | Per-tab overrides |
 | `locations.json` | `group` / `models` / `doneOnly` / `toLocation` | Tab grouping + which jobs it prints |
-| `locations.json` | `requireQrBinding` / `qrWorkcell` | QR binding gate (Work Order) |
+| `locations.json` | `requireQrBinding` / `qrWorkcell` | QR binding gate; `qrWorkcell` = this tab's workcell **number** (tag prefix) |
 
 ---
 
@@ -167,4 +178,5 @@ once: install Node, `npm install` in fg-print-ui **and** print-agent, copy `.env
 `locations.json`, set `FG_UI`/`PRINT_AGENT` absolute paths in the bat. See PROJECT_CONTEXT §22.
 
 **Scanning:** the FG barcode encodes `*j` + Job.Id (e.g. `*j36164`); the app strips `*j`
-and resolves the job. QR binding tags are `<qrWorkcell>:START` / `:END`.
+and resolves the job. QR binding tags are 4-digit numbers `WDSS` (workcell / 1=Start
+2=End / sequence; Start+End share the sequence, e.g. `2101`+`2201`).

@@ -31,7 +31,7 @@
     "weldingToPainting": true,
     "processCodePrepend": "SB",
     "requireQrBinding": true,
-    "qrWorkcell": "K2VG-CELL"
+    "qrWorkcell": "2"
   },
   {
     "id": "work-order-p3-k0wy",
