@@ -41,7 +41,8 @@
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K0WY"]
+    "models": ["K0WY"],
+    "doneOnly": true
   },
   {
     "id": "p3-fg-sticker",

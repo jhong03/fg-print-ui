@@ -701,3 +701,43 @@ fallbacks. All frontend (`public/app.js`); none of it affects the auto-print tri
   `normalizePaused()` un-pauses an emptied queue — no stray Resume on an idle queue.
 
 Frontend cache-busted via `?v=N` on the script tags in `index.html` (currently v10).
+
+---
+
+## 21. Label field mapping + rendering changes (2026-08)
+
+- **`woNumber` = `MO.Field1`** (via `Job.MOId`); **`partNo` = `Product.Field1`**;
+  **`coNumber` carries the JTC No** (`Job.OrderNumber`); `partDesc` = `Product.Name`.
+  (Field keys were remapped in `mapRecord.js` to match the MES template bindings.)
+- **`date` = `Job.ActualEndDate`** (was `CreateDate`), formatted in SQL
+  (`CONVERT(varchar(10), …, 103)`, tz-safe). NULL for unfinished jobs → **blank date**,
+  a second visual gate on top of `doneOnly` / `toLocation` print guards.
+- **Barcode `*j` prefix.** Printed FG barcode encodes `*j` + `Job.Id` (template element
+  has `prefix:"*j"`). Scanning it returns `*j36164`; `getOne` strips the prefix before the
+  id match (`CASE WHEN @jtc LIKE '[*][jJ]%' THEN STUFF(@jtc,1,2,'') …`), mock does the same.
+  OrderNumber match unchanged (real JTC starts `J`, not `*j`).
+- **Model-row collapse** (`render.js` `collapseModelRow`, used by TSPL render + preview).
+  Some templates place `stockCode` + a static `,` + `model` as three fixed-X elements →
+  stray comma when model missing, overlap when stock code long. The collapse merges them
+  into the `stockCode` element as `"stock, model"` (comma only when both present) and drops
+  the static comma + model elements → one flowing string, no stray comma, no overlap. Fires
+  only when the `stockCode` and `model` fields share the same X (that row); other templates
+  untouched.
+- **`toLocation` per-tab filter.** A tab pinned to a `Job.ToLocationId` (e.g. `18` =
+  P3-OUTGOING on `p3-fg-sticker`) surfaces/prints only jobs at that location — search filter
+  + `/api/print` guard (409 `wrongLocation`). Same config pattern as `doneOnly`/`models`.
+
+## 22. Deployment / auto-launch (per production PC)
+
+`start.bat` (repo root) launches both local processes + opens the UI:
+- prepends the Node dir to PATH (`set "PATH=C:\Program Files\nodejs;%PATH%"` — needed when
+  Node isn't on the machine PATH), sets `FG_UI` + `PRINT_AGENT` **absolute** paths, starts
+  `node server\index.js` and the print-agent's `node server.js` (each minimized), waits 4 s,
+  opens `http://localhost:3000` (kiosk line commented for opt-in).
+- **Auto-start:** put `start.bat` (or a shortcut) in `shell:startup` → runs on **login**
+  (operators log in manually; no auto-login needed). Optional full autonomy: `netplwiz`
+  auto-login.
+- **Per machine, once:** install Node, `npm install` in **both** folders (`node_modules`
+  gitignored), copy `.env` + `locations.json`, set `FG_UI`/`PRINT_AGENT` paths in the bat.
+- Trade-off vs NSSM: no crash-restart, needs a logged-in desktop. Chosen for simple deploy
+  amid frequent code changes.

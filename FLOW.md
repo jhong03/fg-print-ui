@@ -152,4 +152,19 @@ Global defaults + secrets in `.env`; per-tab template/variant/calibration in
 | `.env` | `TEMPLATE_TTL_MS` | Auto-refresh window (ms) |
 | `.env` | `AGENT_URL` / `PRINTER_TYPE` | Default print-agent + type |
 | `.env` | `DB_CLIENT` + `MSSQL_*` | Active DB (SQL Server) |
+| `.env` | `MODEL_MODE` | Model expression (default `name` = SubProductGroup.Name) |
 | `locations.json` | `templateId` / `variant` / `barcodeNudge` / `agentUrl` | Per-tab overrides |
+| `locations.json` | `group` / `models` / `doneOnly` / `toLocation` | Tab grouping + which jobs it prints |
+| `locations.json` | `requireQrBinding` / `qrWorkcell` | QR binding gate (Work Order) |
+
+---
+
+## Deployment (per production PC)
+
+`start.bat` (repo root) launches both processes + opens the UI. Auto-start: put it (or a
+shortcut) in `shell:startup` → runs on **login** (operators log in manually). Per machine
+once: install Node, `npm install` in fg-print-ui **and** print-agent, copy `.env` +
+`locations.json`, set `FG_UI`/`PRINT_AGENT` absolute paths in the bat. See PROJECT_CONTEXT §22.
+
+**Scanning:** the FG barcode encodes `*j` + Job.Id (e.g. `*j36164`); the app strips `*j`
+and resolves the job. QR binding tags are `<qrWorkcell>:START` / `:END`.
