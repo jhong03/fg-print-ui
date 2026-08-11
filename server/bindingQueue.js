@@ -8,13 +8,12 @@
  * This is a compliance interlock, not an MES integration — the AI cameras detect
  * the physical start/end independently; we only gate our own printing.
  *
- * Validation is workcell-interlocked. Each tag is a 4-digit number "WDSS":
- *   W  = workcell number (must equal this tab's qrWorkcell)
- *   D  = direction: 1 = Start (Green), 2 = End (Red)
- *   SS = sequence (a Start/End PAIR shares the same SS — one physical station)
- * e.g. 4101 = workcell 4, Start, seq 01; its partner End is 4201. A wrong-workcell
- * tag, an unknown format, or a Start/End whose SS doesn't match the already-scanned
- * partner is rejected (no lockout — the operator just rescans the correct one).
+ * A tag is a 4-digit number where ONLY the 2nd digit is read as the direction:
+ *   2nd digit = 1 -> Start (Green),  2 -> End (Red).
+ * The 1st digit (workcell) and last two (sequence) are NOT validated — any 4-digit
+ * tag whose 2nd digit is 1 or 2 binds. The full scanned number is still recorded and
+ * written to Postgres. Rescanning the same colour replaces it (e.g. change Green from
+ * 2101 to 2102). Anything that isn't such a 4-digit tag is rejected (no lockout).
  *
  * Model: one job runs per workcell, so a location has ONE active (front) item;
  * further triggers queue BEHIND it and only become active once the front item is
@@ -29,7 +28,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const printQueue = require('./printQueue');
-const locations = require('./locations');
 const db = require('./db');
 const qrLink = require('./qrLink');
 
@@ -58,18 +56,14 @@ function load() {
 }
 
 // ---- helpers --------------------------------------------------------------
-// The workcell number a location is gated to. Returns null when unset (misconfig).
-function workcellOf(loc) {
-  const wc = loc && String(loc.qrWorkcell || '').trim();
-  return wc || null;
-}
-
-// Decode a numeric QR tag "WDSS" -> { workcell, dir:'start'|'end', seq:'SS' }, or
-// null if it isn't a valid 4-digit tag (W any digit, D must be 1 or 2, SS 2 digits).
+// Decode a 4-digit QR tag by its 2nd digit only -> { dir:'start'|'end', tag:<int> },
+// or null if it isn't a 4-digit number whose 2nd digit is 1 or 2. The 1st digit
+// (workcell) and last two (sequence) are ignored for gating but kept in `tag`.
 function decode(token) {
-  const m = String(token || '').trim().match(/^(\d)([12])(\d{2})$/);
+  const t = String(token || '').trim();
+  const m = t.match(/^\d([12])\d{2}$/);
   if (!m) return null;
-  return { workcell: m[1], dir: m[2] === '1' ? 'start' : 'end', seq: m[3] };
+  return { dir: m[1] === '1' ? 'start' : 'end', tag: Number(t) };
 }
 
 // The item the operator is acting on: the one they SELECTED (by id) in the list,
@@ -95,8 +89,8 @@ function list(location) {
     location: j.location,
     boundStart: !!j.boundStart,
     boundEnd: !!j.boundEnd,
-    startSeq: j.startSeq || null,
-    endSeq: j.endSeq || null,
+    startTag: j.startTag || null,
+    endTag: j.endTag || null,
     printed: !!j.printed,
     active: j.id === activeId,
   }));
@@ -117,8 +111,8 @@ function add(paintingJtc, location, sourceJtc) {
     location: location || null,
     boundStart: false,
     boundEnd: false,
-    startSeq: null,
-    endSeq: null,
+    startTag: null,
+    endTag: null,
     printed: false,
     at: Date.now(),
   };
@@ -133,36 +127,16 @@ function add(paintingJtc, location, sourceJtc) {
 function scan(location, token, id) {
   const item = itemFor(location, id);
   if (!item) return { ok: false, error: 'No job is waiting for QR binding on this station.' };
-  const loc = locations.get(item.location);
-  const wc = workcellOf(loc);
   const snap = () => list(location).find((x) => x.id === item.id);
-  if (!wc) {
-    return { ok: false, error: 'This station has no qrWorkcell number configured — cannot validate the QR tag.' };
-  }
   const d = decode(token);
   if (!d) {
-    return { ok: false, error: 'Unrecognised QR tag — expected a 4-digit workcell tag.', item: snap() };
+    return { ok: false, error: 'Unrecognised QR tag — expected a 4-digit tag (2nd digit 1 = Start, 2 = End).', item: snap() };
   }
-  // Workcell interlock: the tag's leading digit must be THIS station's number.
-  if (d.workcell !== String(wc)) {
-    return { ok: false, error: `Wrong workcell: this station is ${wc}, but the tag is for workcell ${d.workcell}.`, item: snap() };
-  }
-  // Sequence interlock: Start and End must share the same SS (one physical station).
-  if (d.dir === 'start') {
-    if (item.endSeq && item.endSeq !== d.seq) {
-      return { ok: false, error: `Sequence mismatch: End tag is ${item.endSeq}, Start tag is ${d.seq}. Scan the matching Start/End pair.`, item: snap() };
-    }
-    item.startSeq = d.seq;
-    item.boundStart = true;
-  } else {
-    if (item.startSeq && item.startSeq !== d.seq) {
-      return { ok: false, error: `Sequence mismatch: Start tag is ${item.startSeq}, End tag is ${d.seq}. Scan the matching Start/End pair.`, item: snap() };
-    }
-    item.endSeq = d.seq;
-    item.boundEnd = true;
-  }
+  // Only the direction (2nd digit) gates. Rescanning the same colour replaces its tag.
+  if (d.dir === 'start') { item.startTag = d.tag; item.boundStart = true; }
+  else { item.endTag = d.tag; item.boundEnd = true; }
   persist();
-  return { ok: true, role: d.dir, seq: d.seq, item: snap() };
+  return { ok: true, role: d.dir, tag: d.tag, item: snap() };
 }
 
 // Release the ACTIVE item to the real print queue — the gated print. Only succeeds
@@ -187,13 +161,9 @@ async function releasePrint(location, id) {
   return { ok: true, queued: true, id: r.id, position: r.position, paused: r.paused };
 }
 
-// Resolve the printed painting JTC's Job.Id and write the QR bind row. The scanned
-// tags are rebuilt from this workcell's number + each side's sequence (e.g. wc 2,
-// start seq 01 -> 2101; end seq 01 -> 2201).
+// Resolve the printed painting JTC's Job.Id and write the QR bind row, using the
+// actual scanned tags (e.g. 2101 / 2201) exactly as they came in.
 async function logBinding(item) {
-  const loc = locations.get(item.location);
-  const wc = workcellOf(loc);
-  if (!wc) return;
   let barcodeId = null;
   try {
     const rec = await db.getOne(item.paintingJtc);
@@ -205,10 +175,8 @@ async function logBinding(item) {
     console.warn('[binding] no Job.Id for', item.paintingJtc, '- skipping qrLink write');
     return;
   }
-  const qrStart = Number(`${wc}1${item.startSeq}`);
-  const qrEnd = Number(`${wc}2${item.endSeq}`);
-  const res = await qrLink.record({ jtcBarcodeId: barcodeId, qrStart, qrEnd });
-  if (res.ok) console.log(`[binding] logged qr_jtc_link #${res.id}: barcode=${barcodeId} start=${qrStart} end=${qrEnd}`);
+  const res = await qrLink.record({ jtcBarcodeId: barcodeId, qrStart: item.startTag, qrEnd: item.endTag });
+  if (res.ok) console.log(`[binding] logged qr_jtc_link #${res.id}: barcode=${barcodeId} start=${item.startTag} end=${item.endTag}`);
 }
 
 function remove(id) {

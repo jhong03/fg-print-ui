@@ -30,8 +30,7 @@
     "models": ["K2VG"],
     "weldingToPainting": true,
     "processCodePrepend": "SB",
-    "requireQrBinding": true,
-    "qrWorkcell": "2"
+    "requireQrBinding": true
   },
   {
     "id": "work-order-p3-k0wy",

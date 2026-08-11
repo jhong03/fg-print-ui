@@ -188,15 +188,14 @@ input.addEventListener('paste', () => { pasted = true; });
 
 // Touchscreen support: the workcells have NO keyboard, so tapping the JTC field
 // opens the dropdown to pick from — recent JTCs for this tab's model when empty, or
-// matches for the current text. (The initial programmatic focus at load runs before
-// these listeners are attached, so it doesn't pop the list.)
+// matches for the current text. Bound to CLICK/TAP ONLY (not focus): a scan's
+// programmatic focus() must never pop the list — only a deliberate tap does.
 function openSuggestionsOnTap() {
-  if (suppressTapDropdown) return;   // a global-scan focus() — not an operator tap
+  if (suppressTapDropdown) return;   // guard: a programmatic focus/select, not a tap
   const q = input.value.trim();
   input.select();               // select any existing text so a scan/tap replaces it
   if (q) runSearch(q); else showRecent();
 }
-input.addEventListener('focus', openSuggestionsOnTap);
 input.addEventListener('click', openSuggestionsOnTap);
 
 // Empty-query search = the most recent JTCs for this tab's model, to tap from.
@@ -235,8 +234,9 @@ input.addEventListener('input', (e) => {
  */
 async function acceptScan(q) {
   // A scanned QR TAG (bare 4-digit WDSS) is a binding scan, not a JTC lookup —
-  // route it to the QR gate and clear the box for the next scan.
-  if (isQrToken(q)) { bindingScan(q); input.value = ''; input.focus(); return; }
+  // route it to the QR gate, clear the box, and blur so the dropdown doesn't cover
+  // the preview (the next scan is caught by global capture, which needs no focus).
+  if (isQrToken(q)) { bindingScan(q); input.value = ''; settleAfterScan(); return; }
   if (input.value.trim() !== q) return;   // superseded while we waited
   hideSuggestions();
   setStatus('Loading ' + q + '…');
@@ -257,7 +257,19 @@ async function acceptScan(q) {
   // A scan queues the print hands-free — no button press. (Manual lookups still
   // wait for the Print Label button.) On a QR tab this stages for binding instead.
   enqueuePrint(record.jtcNo || q, { fromScan: true });
-  input.select();   // leave it selected so the next scan replaces it
+  settleAfterScan();   // blur + hide dropdown so the preview stays clear
+}
+
+// After a scan/selection resolves, CLEAR the field, drop the dropdown, and release
+// focus. Clearing is essential: the current JTC lives in the preview + binding list,
+// NOT the box — leaving its text there means the next scan (e.g. a QR rebind 2102)
+// APPENDS to it ("…WF2102") and reads as a bad JTC. Empty + blurred means every
+// following scan is fresh: a JTC loads, a 4-digit QR rebinds. Tap the field to bring
+// the pick-list back for a manual choice.
+function settleAfterScan() {
+  input.value = '';
+  hideSuggestions();
+  input.blur();
 }
 
 // ---- Global scan capture (touchscreen kiosks: no keyboard) -----------------
@@ -440,10 +452,10 @@ async function selectJtc(jtcNo) {
       renderLabel(record);
       setStatus('');
     }
-    // Keep the loaded JTC SELECTED so the operator's next scan replaces it outright
-    // (no manual Clear) — same as the scan path. Matters most on touchscreens where
-    // the current JTC was picked by tapping a suggestion.
-    input.select();
+    // Blur + hide the dropdown so the preview stays clear (same as the scan path).
+    // The next scan replaces the value via global capture — nothing lost by not
+    // keeping the field selected.
+    settleAfterScan();
   } catch (e) {
     showEmpty();
     setStatus(e.message, true);
@@ -930,16 +942,11 @@ function renderBinding(jobs) {
     if (isSel) {
       const tasks = document.createElement('div');
       tasks.className = 'b-tasks';
-      // Expected tag under each pill. Before any scan it's generic (21xx / 22xx);
-      // once EITHER tag is scanned its sequence is locked, so show the exact partner
-      // (scan 2101 -> End expected becomes 2201).
-      const wc = currentLocation?.qrWorkcell || '';
-      const locked = j.startSeq || j.endSeq || null;
-      const startExp = wc ? wc + '1' + (j.startSeq || locked || 'xx') : '';
-      const endExp = wc ? wc + '2' + (j.endSeq || locked || 'xx') : '';
+      // Only the 2nd digit gates direction, so there's no fixed "expected" tag.
+      // Show the actual scanned number under each pill once it's bound.
       tasks.append(
-        taskPill('green', 'Green · Start', j.boundStart, startExp && ('expect ' + startExp)),
-        taskPill('red', 'Red · End', j.boundEnd, endExp && ('expect ' + endExp))
+        taskPill('green', 'Green · Start', j.boundStart, j.startTag ? String(j.startTag) : ''),
+        taskPill('red', 'Red · End', j.boundEnd, j.endTag ? String(j.endTag) : '')
       );
       li.insertBefore(tasks, rm);
     }
