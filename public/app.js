@@ -100,7 +100,9 @@ function renderMasterTabs() {
 // single destination (the master tab already IS that destination).
 function renderSubTabs() {
   const locs = locsInGroup(currentGroup);
-  if (locs.length <= 1) { tabs.hidden = true; tabs.innerHTML = ''; return; }
+  // Hide the row only when there are NO tabs. A single tab still shows (the operator
+  // wants to see which label type this terminal is on, even if it's the only one).
+  if (locs.length < 1) { tabs.hidden = true; tabs.innerHTML = ''; return; }
   tabs.innerHTML = '';
   locs.forEach((loc) => {
     const btn = document.createElement('button');

@@ -16,7 +16,8 @@ are held/retried), and the **reload-template mechanism**.
 2. **Pick the group** (master tab, e.g. *P1* / *P3*), then the **destination tab**
    within it (*FG Sticker (QC)*, *Work Order (P3) – K2VG*, …). Your choice is
    remembered on this terminal. (The group row only appears when there's more than one
-   group; the destination row only when a group has more than one tab.)
+   group; the destination row shows whenever the group has at least one tab — including
+   a single tab, so a one-label terminal still shows its tab.)
 3. **Pick the job:**
    - **Scan** the JTC barcode (or paste it) → it loads **and queues to print
      automatically**, hands-free. You **don't need to tap the field first** — a scan
