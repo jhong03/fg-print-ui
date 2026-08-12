@@ -13,13 +13,13 @@ $agent = Start-Process -FilePath $node -ArgumentList "server.js"       -WorkingD
 
 Start-Sleep -Seconds 4
 
-# --- open UI in its own Edge window (app mode = single, closable window) ---
-$edge    = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+# --- open UI in its own Chrome window (app mode = single window, maximized) ---
+$chrome  = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 $profile = Join-Path $env:LOCALAPPDATA "fgui-window"
-$browser = Start-Process -FilePath $edge -ArgumentList "--app=$url","--user-data-dir=`"$profile`"" -PassThru
+$browser = Start-Process -FilePath $chrome -ArgumentList "--app=$url","--start-maximized","--user-data-dir=`"$profile`"" -PassThru
 
 # Kiosk full-screen instead? comment the line above, uncomment below:
-# $browser = Start-Process -FilePath $edge -ArgumentList "--kiosk",$url,"--edge-kiosk-type=fullscreen","--no-first-run","--user-data-dir=`"$profile`"" -PassThru
+# $browser = Start-Process -FilePath $chrome -ArgumentList "--kiosk",$url,"--no-first-run","--user-data-dir=`"$profile`"" -PassThru
 
 # --- block until the UI window is closed, then stop both services ---
 $browser.WaitForExit()
