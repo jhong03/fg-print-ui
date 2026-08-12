@@ -83,7 +83,8 @@ const RECORDS = [
     partNo: 'E23-0100',
     model: 'K2VG',
     date: '30/07/2026',
-    qty: 50,
+    qty: 0,          // QuantityCompleted — painting not run yet
+    reqQty: 46,      // Quantity (required/planned) — what the WO label should show
     uom: 'PCS',
     woNumber: 'WO-2606-594E23',
     coNo: '',

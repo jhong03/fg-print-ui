@@ -44,6 +44,30 @@ function prependProcessCode(record, loc) {
   return record;
 }
 
+// Today's date as dd/mm/yyyy (local wall clock). Built directly so it can't be
+// timezone-shifted the way a driver-read datetime could.
+function today() {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+/*
+ * Work Order (painting) label overrides — DIFFERENT from FG labels. A painting job
+ * printed via the welding->painting flow isn't finished, so:
+ *   - qty  = the REQUIRED/planned quantity (Job.Quantity, carried as reqQty), not
+ *            QuantityCompleted (which is 0 until the painting line runs).
+ *   - date = the day it's PRINTED (painting ActualEndDate is NULL -> would be blank).
+ * Applied in place, only on the welding->painting path (preview + dispatch).
+ */
+function applyWorkOrderFields(record) {
+  if (!record) return record;
+  if (record.reqQty != null) record.qty = record.reqQty;
+  record.date = today();
+  return record;
+}
+
 /*
  * Resolve a fetched record + location to what should actually be printed/previewed.
  * Returns { record, sourceJtc }:
@@ -63,10 +87,11 @@ async function resolvePainting(record, loc, db) {
     const painting = await db.getOne(String(record.parentJobId));
     if (painting) {
       prependProcessCode(painting, loc);
+      applyWorkOrderFields(painting);
       return { record: painting, sourceJtc: record.jtcNo };
     }
   }
   return { record, sourceJtc: null };
 }
 
-module.exports = { isLeakTest, resolvePainting, prependProcessCode };
+module.exports = { isLeakTest, resolvePainting, prependProcessCode, applyWorkOrderFields };

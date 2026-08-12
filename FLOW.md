@@ -88,7 +88,11 @@ JTC (`processCode` `L-T`/`LKT`) resolves via `Job.ParentJob` to its **Painting**
 and previews/prints THAT label; the welding JTC rides along as provenance. The
 label's Process Code is **prepended** with `SB` (ShotBlast) via
 `locations.json` `processCodePrepend` — so K2VG shows `SB, PL` (revert by clearing
-that key). See PROJECT_CONTEXT §17.
+that key). Two more WO-only field overrides (differ from FG labels, since a painting
+job isn't finished): **qty = the required/planned quantity** (`Job.Quantity`, carried
+as `reqQty`) not `QuantityCompleted` (which is 0), and **Date Issue = the print date**
+(painting `ActualEndDate` is NULL). Both applied in `paintingFlow.applyWorkOrderFields`
+at preview AND dispatch (print-time date). See PROJECT_CONTEXT §17.
 
 ---
 

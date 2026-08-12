@@ -103,6 +103,7 @@ module.exports = {
         -- second visual gate on top of the doneOnly / location print guards.
         CONVERT(varchar(10), j.ActualEndDate, 103) AS date,
         j.QuantityCompleted        AS qty,
+        j.Quantity                 AS reqQty,
         co.OrderNumber    AS coNo,
         j.Id              AS barcodeId,
         u.EmployeeNum     AS empNo,
