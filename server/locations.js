@@ -104,6 +104,13 @@ function resolveEntry(entry, d) {
   // Pin a tab to one stock location: only jobs whose Job.ToLocationId equals this
   // surface / print (e.g. 18 = P3-OUTGOING for the P3 FG label). null = no filter.
   const toLocation = Number.isInteger(entry.toLocation) ? entry.toLocation : null;
+  // Faux-bold on print (MES has no bold): `boldTitle:true` emboldens the label's
+  // title (largest static text); `boldText` is a list of exact static texts or field
+  // keys to embolden too. Both empty/false = print exactly as designed. See render.js.
+  const boldTitle = entry.boldTitle === true;
+  const boldText = Array.isArray(entry.boldText)
+    ? entry.boldText.map((s) => String(s).trim()).filter(Boolean)
+    : [];
   return {
     id: String(entry.id),
     name: String(entry.name || entry.id),
@@ -121,6 +128,8 @@ function resolveEntry(entry, d) {
     qrWorkcell,
     doneOnly,
     toLocation,
+    boldTitle,
+    boldText,
   };
 }
 

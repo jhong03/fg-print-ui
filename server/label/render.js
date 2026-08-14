@@ -141,19 +141,30 @@ function makeUpright(elements, heightDots) {
   };
 }
 
+// Faux-bold: TSPL2 TEXT has no bold attribute, so we overstrike — print the same
+// glyphs a few times nudged by 1 dot, thickening the strokes. These offsets (right,
+// down, and the diagonal) give a clean bold at 203 dpi without blurring.
+const BOLD_OFFSETS = [[0, 0], [1, 0], [0, 1], [1, 1]];
+
 // Returns an array of TSPL command lines for one element (text may wrap into
 // several TEXT lines). `U` is the upright transform, or null to emit as designed.
-function renderElement(el, values, elements, barcodeNudge = 0, U = null) {
+// `bold` overstrikes the text (see BOLD_OFFSETS).
+function renderElement(el, values, elements, barcodeNudge = 0, U = null, bold = false) {
   switch (el.type) {
     case 'text': {
       const val = resolveValue(el, values);
+      const offsets = bold ? BOLD_OFFSETS : [[0, 0]];
       // Wrapping is measured in the design's own space, then transformed — so
       // the line breaks are identical either way.
-      return layoutText(el, val, elements).map((seg) => {
+      const out = [];
+      for (const seg of layoutText(el, val, elements)) {
         const p = U ? U.point(seg.x, seg.y) : seg;
         const rot = U ? U.angle(el.rotation) : el.rotation;
-        return `TEXT ${p.x},${p.y},"${el.font}",${rot},${el.xMul},${el.yMul},"${q(seg.text)}"`;
-      });
+        for (const [dx, dy] of offsets) {
+          out.push(`TEXT ${p.x + dx},${p.y + dy},"${el.font}",${rot},${el.xMul},${el.yMul},"${q(seg.text)}"`);
+        }
+      }
+      return out;
     }
     case 'bar': {
       if (!U) return [`BAR ${el.x},${el.y},${el.width},${el.height}`];
@@ -212,6 +223,41 @@ function collapseModelRow(elements, values) {
   };
 }
 
+// The biggest STATIC text element — the label's title (e.g. "WORK ORDER LABEL").
+// "Biggest" = largest font multiplier area; ties keep the first. null if none.
+function largestStaticText(elements) {
+  const texts = elements.filter(
+    (e) => e.type === 'text' && e.value?.kind === 'static' && String(e.value.text || '').trim()
+  );
+  if (!texts.length) return null;
+  const size = (e) => (Number(e.xMul) || 1) * (Number(e.yMul) || 1);
+  return texts.reduce((a, b) => (size(b) > size(a) ? b : a));
+}
+
+// Decide which text elements to embolden, from the tab's options:
+//   boldTitle:true      -> the label's title (largest static text)
+//   boldText:[...]      -> any text whose static value OR field key matches (ci)
+// Returns a Set of elements. Empty when nothing is configured (no behaviour change).
+function computeBoldSet(elements, opts) {
+  const set = new Set();
+  if (opts.boldTitle) {
+    const t = largestStaticText(elements);
+    if (t) set.add(t);
+  }
+  const list = (opts.boldText || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  if (list.length) {
+    for (const el of elements) {
+      if (el.type !== 'text') continue;
+      const v = el.value || {};
+      const key = v.kind === 'static' ? String(v.text || '').trim().toLowerCase()
+        : v.kind === 'field' ? String(v.field || '').trim().toLowerCase()
+        : '';
+      if (key && list.includes(key)) set.add(el);
+    }
+  }
+  return set;
+}
+
 function renderTspl(template, values = {}, opts = {}) {
   const L = template.label || {};
   const barcodeNudge = opts.barcodeNudge != null
@@ -242,8 +288,9 @@ function renderTspl(template, values = {}, opts = {}) {
 
   // Wrap against where things actually land, not where the template put them.
   const placed = placedElements(elements, vals);
+  const boldEls = computeBoldSet(elements, opts);
   for (const el of elements) {
-    for (const line of renderElement(el, vals, placed, barcodeNudge, U)) lines.push(line);
+    for (const line of renderElement(el, vals, placed, barcodeNudge, U, boldEls.has(el))) lines.push(line);
   }
 
   lines.push('PRINT 1,1');

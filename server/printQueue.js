@@ -212,7 +212,7 @@ async function dispatch(job, loc) {
     // on sourceJtc so a painting JTC printed directly stays untouched.
     if (job.sourceJtc) { prependProcessCode(record, loc); applyWorkOrderFields(record); }
     const template = await getTemplate(loc.templateId);
-    tspl = renderTspl(template, mapRecordToFields(record), { variant: loc.variant, barcodeNudge: loc.barcodeNudge, upright: loc.upright });
+    tspl = renderTspl(template, mapRecordToFields(record), { variant: loc.variant, barcodeNudge: loc.barcodeNudge, upright: loc.upright, boldTitle: loc.boldTitle, boldText: loc.boldText });
   } catch (err) {
     return { verdict: 'skip', error: 'Render failed: ' + err.message };
   }

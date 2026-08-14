@@ -49,9 +49,10 @@
     "group": "P3",
     "templateId": "20",
     "variant": "plain",
-    "barcodeNudge": 72,
+    "barcodeNudge": 100,
     "models": [],
     "doneOnly": true,
-    "toLocation": 18
+    "toLocation": 18,
+    "boldTitle": true
   }
 ]

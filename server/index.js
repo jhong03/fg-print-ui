@@ -31,7 +31,13 @@ function resolveLocation(req) {
 
 // Everything renderTspl/buildModel need, taken from the resolved location.
 function printOptsFor(loc) {
-  return { variant: loc.variant, barcodeNudge: loc.barcodeNudge, upright: loc.upright };
+  return {
+    variant: loc.variant,
+    barcodeNudge: loc.barcodeNudge,
+    upright: loc.upright,
+    boldTitle: loc.boldTitle,
+    boldText: loc.boldText,
+  };
 }
 
 // ---- Static assets --------------------------------------------------------
