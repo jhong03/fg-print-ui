@@ -120,7 +120,14 @@ Prints go through a **persistent queue** (`server/printQueue.js`, saved to
   can't auto-detect it — it shows "Sent to printer"; the operator watches the
   printer (which also reprints held jobs on feed after reloading).
 
-Endpoints: `GET /api/queue`, `POST /api/queue/{pause|resume|remove|clear|clear-all}`.
+- **Clear printer spooler:** a button (queue controls) purges a stuck Windows
+  spool job for this tab's printer — no navigating to Windows settings. Same
+  `Get-PrintJob | Remove-PrintJob` the pause path uses (`server/spooler.js`);
+  clears the OS spooler only, never our own queued jobs. Fixes the "printer online
+  but print fails, stray stuck spool job" case.
+
+Endpoints: `GET /api/queue`,
+`POST /api/queue/{pause|resume|remove|clear|clear-all|clear-spooler}`.
 
 **QR binding gate (P3 Work Order tab):** on a `requireQrBinding` tab the job is held
 in a **pending-binding queue** first — `GET /api/binding`,

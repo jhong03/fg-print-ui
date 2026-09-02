@@ -666,6 +666,7 @@ const resumeBtn = document.getElementById('resumeBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const clearQueueBtn = document.getElementById('clearQueueBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
+const clearSpoolerBtn = document.getElementById('clearSpoolerBtn');
 
 // Latest auto-print watcher status (null until first /api/auto poll). Kept here
 // so renderQueue can keep the panel visible while the station is auto-watching,
@@ -785,6 +786,32 @@ clearQueueBtn.addEventListener('click', () => queueAction('clear'));
 clearAllBtn.addEventListener('click', () => {
   if (confirm('Clear the entire print queue, including jobs still waiting to print? This cannot be undone.')) {
     queueAction('clear-all');
+  }
+});
+
+// Purge a stuck Windows spool job for this tab's printer — no Windows settings.
+// Clears the printer's OS spooler only; it does NOT drop our own queued jobs.
+const SPOOLER_REASON = {
+  'remote-agent': "This printer isn't on this PC — clear it on that machine.",
+  'agent-unreachable': 'Print agent not reachable — is it running?',
+  'no-printer': 'No printer found for this tab.',
+};
+clearSpoolerBtn.addEventListener('click', async () => {
+  clearSpoolerBtn.disabled = true;
+  setStatus('Clearing printer spooler…');
+  try {
+    const r = await (await fetch('/api/queue/clear-spooler', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: currentLocation?.id }),
+    })).json();
+    if (r.queue) renderQueue(r.queue);
+    if (r.ok) setStatus(r.empty ? 'Printer spooler cleared.' : 'Spooler clear sent — still draining.');
+    else setStatus(SPOOLER_REASON[r.reason] || 'Could not clear the spooler.', true);
+  } catch (e) {
+    setStatus('Clear spooler failed: ' + e.message, true);
+  } finally {
+    clearSpoolerBtn.disabled = false;
   }
 });
 

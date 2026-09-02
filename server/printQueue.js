@@ -289,6 +289,26 @@ async function clearSpooler(loc) {
   }
 }
 
+// Operator-triggered "Clear printer spooler": purge the Windows spooler for this
+// tab's printer, no navigating to Windows settings. Same mechanism the pause path
+// uses. Returns { ok, empty, reason? } for the UI. Does NOT touch our own queue.
+async function clearPrinterSpooler(loc) {
+  if (!isLocalAgent(loc)) return { ok: false, reason: 'remote-agent' };
+  let name;
+  try {
+    name = (await agent.printerStatus(loc)).name;
+  } catch (_) {
+    return { ok: false, reason: 'agent-unreachable' };
+  }
+  if (!name) return { ok: false, reason: 'no-printer' };
+  await spooler.clear(name);
+  let empty = true;
+  try {
+    empty = (await agent.printerStatus(loc)).queueDepth === 0;
+  } catch (_) { /* can't confirm; report ok anyway */ }
+  return { ok: true, empty, printer: name };
+}
+
 // Process one job to a terminal state, mutating it in place and persisting.
 // Returns 'continue' (advance to the next job) or 'pause' (stop the run).
 async function processOne(job) {
@@ -348,4 +368,4 @@ function kick() {
 
 load();
 
-module.exports = { add, list, pause, resume, remove, clearFinished, clearAll };
+module.exports = { add, list, pause, resume, remove, clearFinished, clearAll, clearPrinterSpooler };

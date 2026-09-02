@@ -224,6 +224,13 @@ app.post('/api/queue/resume', (req, res) => { printQueue.resume(); res.json(prin
 app.post('/api/queue/remove', (req, res) => { printQueue.remove(req.body?.id); res.json(printQueue.list()); });
 app.post('/api/queue/clear', (req, res) => { printQueue.clearFinished(); res.json(printQueue.list()); });
 app.post('/api/queue/clear-all', (req, res) => { printQueue.clearAll(); res.json(printQueue.list()); });
+// Operator "Clear printer spooler" — purge the stuck Windows spool job for this
+// tab's printer without opening Windows settings. Returns the result + the queue.
+app.post('/api/queue/clear-spooler', async (req, res) => {
+  const loc = resolveLocation(req);
+  const r = await printQueue.clearPrinterSpooler(loc);
+  res.json({ ...r, queue: printQueue.list() });
+});
 
 // ---- QR binding (phase 2) -------------------------------------------------
 // The pending-binding queue for QR-gated tabs. The job is staged here (by the
