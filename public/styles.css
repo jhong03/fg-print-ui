@@ -92,6 +92,35 @@ html, body {
   border-color: var(--accent);
 }
 
+/* A paired destination (for example K2VG Normal/Rework) is one page with an
+   internal mode switch. The backend location IDs remain separate. */
+.mode-toggle {
+  display: inline-flex;
+  gap: 4px;
+  margin: 8px 0 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #eef0f2;
+}
+.mode-toggle__btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 5px 13px;
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.mode-toggle__btn:hover { color: var(--ink); }
+.mode-toggle__btn--active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
 /* ---- Print queue ---- */
 .queue {
   margin-top: 28px;
@@ -418,6 +447,7 @@ html, body {
 }
 .b-pill--green.b-pill--done { color: #1c6b3f; background: #e7f4ec; border-color: #cfe8d9; }
 .b-pill--red.b-pill--done   { color: #8a2b2b; background: #fbeceb; border-color: #f2d4d2; }
+.b-pill--black.b-pill--done { color: #111418; background: #eceef0; border-color: #c8ccd1; }
 .b-remove {
   flex-shrink: 0;
   width: 28px; height: 28px;

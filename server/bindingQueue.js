@@ -30,6 +30,7 @@ const path = require('node:path');
 const printQueue = require('./printQueue');
 const db = require('./db');
 const qrLink = require('./qrLink');
+const reworkQrLink = require('./reworkQrLink');
 
 const FILE = path.join(__dirname, '..', 'binding-jobs.json');
 
@@ -69,8 +70,10 @@ function decode(token) {
 // The item the operator is acting on: the one they SELECTED (by id) in the list,
 // or the front (oldest) item when no id is given. The queue keeps its order; the
 // selection just chooses which staged job the preview/scan/print apply to.
-function itemFor(location, id) {
-  const forLoc = jobs.filter((j) => j.location === location);
+function itemFor(location, id, mode) {
+  const forLoc = jobs.filter((j) =>
+    j.location === location && (!mode || (j.bindingMode || 'normal') === mode)
+  );
   if (id != null && id !== '') {
     return forLoc.find((j) => j.id === Number(id)) || null;
   }
@@ -89,6 +92,9 @@ function list(location) {
     location: j.location,
     boundStart: !!j.boundStart,
     boundEnd: !!j.boundEnd,
+    bindingMode: j.bindingMode || 'normal',
+    boundRework: !!j.boundRework,
+    reworkQrId: j.reworkQrId || null,
     startTag: j.startTag || null,
     endTag: j.endTag || null,
     printed: !!j.printed,
@@ -100,15 +106,22 @@ function list(location) {
 // Stage a job for binding. Deduped by paintingJtc+location so the auto-trigger and
 // a manual scan of the same JTC don't create two rows. Returns the (existing or
 // new) item's public shape.
-function add(paintingJtc, location, sourceJtc) {
+function add(paintingJtc, location, sourceJtc, bindingMode = 'normal') {
   const jtc = String(paintingJtc || '').trim();
-  const existing = jobs.find((j) => j.location === location && j.paintingJtc === jtc && !j.printed);
+  const mode = bindingMode === 'rework' ? 'rework' : 'normal';
+  const existing = jobs.find((j) =>
+    j.location === location &&
+    j.paintingJtc === jtc &&
+    (j.bindingMode || 'normal') === mode &&
+    !j.printed
+  );
   if (existing) return list(location).find((x) => x.id === existing.id);
   const job = {
     id: ++seq,
     paintingJtc: jtc,
     sourceJtc: sourceJtc ? String(sourceJtc).trim() : null,
     location: location || null,
+    bindingMode: mode,
     boundStart: false,
     boundEnd: false,
     startTag: null,
@@ -124,10 +137,21 @@ function add(paintingJtc, location, sourceJtc) {
 // Validate a scanned token against the ACTIVE item's workcell tags and record the
 // Start/End bind. Returns { ok, role?, error?, item? }. Never throws on a bad scan
 // — a mismatch is a normal, retryable outcome (no lockout).
-function scan(location, token, id) {
-  const item = itemFor(location, id);
+function scan(location, token, id, bindingMode = 'normal') {
+  const mode = bindingMode === 'rework' ? 'rework' : 'normal';
+  const item = itemFor(location, id, mode);
   if (!item) return { ok: false, error: 'No job is waiting for QR binding on this station.' };
   const snap = () => list(location).find((x) => x.id === item.id);
+  if (mode === 'rework') {
+    const t = String(token || '').trim();
+    if (!/^03\d{2}$/.test(t)) {
+      return { ok: false, error: 'Unrecognised Rework QR — expected a 03xx Black QR tag.', item: snap() };
+    }
+    item.reworkQrId = t;
+    item.boundRework = true;
+    persist();
+    return { ok: true, role: 'rework', tag: t, item: snap() };
+  }
   const d = decode(token);
   if (!d) {
     return { ok: false, error: 'Unrecognised QR tag — expected a 4-digit tag (2nd digit 1 = Start, 2 = End).', item: snap() };
@@ -143,9 +167,49 @@ function scan(location, token, id) {
 // when both Green and Red are bound (the compliance gate; there is no bypass). The
 // item STAYS (printed=true) so the preview persists until the operator clears it,
 // and a manual re-click reprints. Returns { ok, error?, queued? }.
-async function releasePrint(location, id) {
-  const item = itemFor(location, id);
+async function releasePrint(location, id, bindingMode = 'normal') {
+  const mode = bindingMode === 'rework' ? 'rework' : 'normal';
+  const item = itemFor(location, id, mode);
   if (!item) return { ok: false, error: 'No job is waiting for QR binding on this station.' };
+  if (mode === 'rework') {
+    if (!item.boundRework) {
+      return { ok: false, error: 'Scan the Black Rework QR before printing.' };
+    }
+    if (!item.printed) {
+      let rec;
+      try {
+        rec = await db.getOne(item.paintingJtc);
+      } catch (err) {
+        return {
+          ok: false,
+          error: `Could not resolve Painting JTC ${item.paintingJtc} from SQL Server: ${err.message}`,
+        };
+      }
+      const jtcId = rec && rec.barcodeId != null ? Number(rec.barcodeId) : null;
+      if (!Number.isInteger(jtcId)) {
+        return {
+          ok: false,
+          error: `Painting JTC ${item.paintingJtc} has no valid SQL Server Job.Id.`,
+        };
+      }
+      const linked = await reworkQrLink.record({
+        qrId: item.reworkQrId,
+        jtcId,
+        remarks: null,
+      });
+      if (!linked.ok) {
+        return {
+          ok: false,
+          error: linked.error,
+          alreadyBound: linked.reason === 'already-bound',
+        };
+      }
+    }
+    const r = printQueue.add(item.paintingJtc, item.location, item.sourceJtc);
+    item.printed = true;
+    persist();
+    return { ok: true, queued: true, id: r.id, position: r.position, paused: r.paused };
+  }
   if (!item.boundStart || !item.boundEnd) {
     return { ok: false, error: 'Scan the Green (Start) and Red (End) QR tags before printing.' };
   }

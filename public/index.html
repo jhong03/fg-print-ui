@@ -4,13 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JTC Lookup</title>
-  <link rel="stylesheet" href="styles.css?v=18" />
+  <link rel="stylesheet" href="styles.css?v=19" />
 </head>
 <body>
   <main class="page">
     <!-- Master tabs (groups, e.g. P1 / P3) + destination tabs. From /api/locations. -->
     <div class="tabs tabs--master" id="masterTabs" role="tablist" aria-label="Label group" hidden></div>
     <div class="tabs" id="tabs" role="tablist" aria-label="Print destination" hidden></div>
+    <div class="mode-toggle" id="modeToggle" role="group" aria-label="K2VG mode" hidden></div>
 
     <!-- Search / scan -->
     <section class="search" id="searchArea">
@@ -37,12 +38,12 @@
          Work Order label releases to the print queue only after both tags scan. -->
     <section class="binding" id="bindingPanel" hidden>
       <div class="binding__head">
-        <span class="binding__title">QR binding required</span>
+        <span id="bindingTitle" class="binding__title">QR binding required</span>
         <span id="bindingState" class="binding__state"></span>
       </div>
       <ul id="bindingList" class="binding__list"></ul>
       <p id="bindingError" class="binding__error" role="alert" hidden></p>
-      <p class="binding__note">Scan this workcell's <b class="dot dot--green">Green (Start)</b> and <b class="dot dot--red">Red (End)</b> QR tags to release the label. Wrong tag? It's rejected — just scan the correct one.</p>
+      <p id="bindingNote" class="binding__note">Scan this workcell's <b class="dot dot--green">Green (Start)</b> and <b class="dot dot--red">Red (End)</b> QR tags to release the label. Wrong tag? It's rejected — just scan the correct one.</p>
     </section>
 
     <!-- Label preview -->
@@ -92,7 +93,7 @@
   </main>
 
   <script src="/vendor/JsBarcode.all.min.js"></script>
-  <script src="labelPreview.js?v=18"></script>
-  <script src="app.js?v=18"></script>
+  <script src="labelPreview.js?v=19"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

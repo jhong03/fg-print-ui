@@ -87,6 +87,8 @@ function resolveEntry(entry, d) {
   // tags. `qrWorkcell` is this station's workcell NUMBER; tags are 4-digit "WDSS"
   // (W=workcell, D=1 Start/2 End, SS=sequence, Start/End share SS). See bindingQueue.js.
   const requireQrBinding = entry.requireQrBinding === true;
+  // Rework tabs use one Black Rework QR instead of the normal Green + Red pair.
+  const reworkQrBinding = entry.reworkQrBinding === true;
   const qrWorkcell = String(entry.qrWorkcell || '').trim();
   // Welding->Painting only: a process code to PREPEND to the painting label's
   // process code (e.g. "SB" for ShotBlast — the painting line's first physical
@@ -97,6 +99,10 @@ function resolveEntry(entry, d) {
   // Master-tab grouping: a category label so the UI can bucket locations (e.g. "P1",
   // "P3"). Blank falls back to "Other" in the UI.
   const group = String(entry.group || '').trim();
+  // UI mode pairing: related destinations can appear as one page with a mode toggle
+  // while retaining separate IDs and queues internally.
+  const modeGroup = String(entry.modeGroup || entry.id || '').trim();
+  const mode = String(entry.mode || '').trim().toLowerCase() || null;
   // FG Sticker tabs: only completed jobs (Job.ActualEndDate set) may be searched or
   // printed — you only sticker a finished good. Enforced in the search filter AND at
   // /api/print (a scanned barcode can't bypass it). See queries.js + index.js.
@@ -115,6 +121,8 @@ function resolveEntry(entry, d) {
     id: String(entry.id),
     name: String(entry.name || entry.id),
     group,
+    modeGroup,
+    mode,
     templateId: String(entry.templateId || d.templateId),
     printerType: String(entry.printerType || d.printerType),
     agentUrl: String(entry.agentUrl || d.agentUrl).replace(/\/+$/, ''),
@@ -125,6 +133,8 @@ function resolveEntry(entry, d) {
     weldingToPainting,
     processCodePrepend,
     requireQrBinding,
+    reworkQrBinding,
+    bindingMode: reworkQrBinding ? 'rework' : (requireQrBinding ? 'normal' : null),
     qrWorkcell,
     doneOnly,
     toLocation,

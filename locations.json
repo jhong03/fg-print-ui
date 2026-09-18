@@ -23,6 +23,8 @@
     "id": "work-order-p3-k2vg",
     "name": "Work Order (P3) - K2VG",
     "group": "P3",
+    "modeGroup": "work-order-p3-k2vg",
+    "mode": "normal",
     "templateId": "13",
     "variant": "plain",
     "barcodeNudge": 0,
@@ -42,6 +44,19 @@
     "upright": false,
     "models": ["K0WY"],
     "doneOnly": true
+  },
+  {
+    "id": "work-order-p3-k2vg-rework",
+    "name": "Work Order (P3) - K2VG Rework",
+    "group": "P3",
+    "modeGroup": "work-order-p3-k2vg",
+    "mode": "rework",
+    "templateId": "13",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": ["K2VG"],
+    "reworkQrBinding": true
   },
   {
     "id": "p3-fg-sticker",

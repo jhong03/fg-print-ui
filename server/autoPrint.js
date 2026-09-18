@@ -91,6 +91,9 @@ function routeMap() {
   const map = new Map();
   for (const loc of locations.list()) {
     if (!ownedIds.includes(loc.id)) continue;
+    // Rework is deliberately manual. A completed production job must never
+    // enter the Rework tab through the normal completion watcher.
+    if (loc.reworkQrBinding) continue;
     for (const m of loc.models || []) map.set(m, loc); // models already normalised
   }
   return map;
@@ -242,6 +245,10 @@ async function testTrigger(jtcNo, locationOverride = null) {
   // welding one. For non-welding tabs this is a no-op (target = the entered job).
   const { record: target, sourceJtc } = await resolvePainting(rec, loc, db);
   const printJtc = target.jtcNo;
+
+  if (loc.reworkQrBinding) {
+    return { ok: false, reason: 'Rework locations are manual-only and cannot be auto-triggered.' };
+  }
 
   if (loc.requireQrBinding) {
     const b = bindingQueue.add(printJtc, loc.id, sourceJtc);

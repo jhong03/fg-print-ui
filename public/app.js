@@ -18,6 +18,7 @@ const tsplCopy = document.getElementById('tsplCopy');
 const reloadTplBtn = document.getElementById('reloadTplBtn');
 const tabs = document.getElementById('tabs');
 const masterTabs = document.getElementById('masterTabs');
+const modeToggle = document.getElementById('modeToggle');
 
 let activeIndex = -1;   // highlighted suggestion for keyboard nav
 let currentList = [];   // current suggestion data
@@ -39,8 +40,20 @@ let locationName = {};        // id -> friendly name, for labelling queued jobs
 let allLocations = [];        // every destination from /api/locations
 let currentGroup = null;      // the selected master tab (group)
 
+function bindingModeFor(loc = currentLocation) {
+  if (loc?.reworkQrBinding || loc?.bindingMode === 'rework') return 'rework';
+  if (loc?.requireQrBinding || loc?.bindingMode === 'normal') return 'normal';
+  return null;
+}
+
+function hasBindingGate(loc = currentLocation) {
+  return !!bindingModeFor(loc);
+}
+
 // Group helpers. A location with no `group` falls into "Other".
 const groupOf = (loc) => (loc && loc.group) || 'Other';
+const modeGroupOf = (loc) => (loc && loc.modeGroup) || (loc && loc.id) || '';
+const modeMembers = (loc) => allLocations.filter((x) => modeGroupOf(x) === modeGroupOf(loc));
 function groupList() {
   const seen = [];
   allLocations.forEach((l) => { const g = groupOf(l); if (!seen.includes(g)) seen.push(g); });
@@ -100,22 +113,49 @@ function renderMasterTabs() {
 // single destination (the master tab already IS that destination).
 function renderSubTabs() {
   const locs = locsInGroup(currentGroup);
+  const pages = [];
+  locs.forEach((loc) => {
+    if (!pages.some((x) => modeGroupOf(x) === modeGroupOf(loc))) pages.push(loc);
+  });
   // Hide the row only when there are NO tabs. A single tab still shows (the operator
   // wants to see which label type this terminal is on, even if it's the only one).
-  if (locs.length < 1) { tabs.hidden = true; tabs.innerHTML = ''; return; }
+  if (pages.length < 1) { tabs.hidden = true; tabs.innerHTML = ''; renderModeToggle(); return; }
   tabs.innerHTML = '';
-  locs.forEach((loc) => {
+  pages.forEach((loc) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'tab';
     btn.setAttribute('role', 'tab');
-    btn.dataset.id = loc.id;
-    btn.textContent = loc.name;
+    btn.dataset.modeGroup = modeGroupOf(loc);
+    btn.textContent = loc.name.replace(/\s+Rework$/i, '');
     btn.addEventListener('click', () => selectLocation(loc));
     tabs.appendChild(btn);
   });
   tabs.hidden = false;
+  renderModeToggle();
   markActiveTab();
+}
+
+function renderModeToggle() {
+  if (!modeToggle) return;
+  const members = modeMembers(currentLocation)
+    .filter((loc) => loc.mode === 'normal' || loc.mode === 'rework');
+  if (members.length < 2) {
+    modeToggle.hidden = true;
+    modeToggle.innerHTML = '';
+    return;
+  }
+  modeToggle.innerHTML = '';
+  members.forEach((loc) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mode-toggle__btn' + (loc.id === currentLocation?.id ? ' mode-toggle__btn--active' : '');
+    btn.textContent = loc.mode === 'rework' ? 'Rework' : 'Normal';
+    btn.setAttribute('aria-pressed', loc.id === currentLocation?.id ? 'true' : 'false');
+    btn.addEventListener('click', () => selectLocation(loc));
+    modeToggle.appendChild(btn);
+  });
+  modeToggle.hidden = false;
 }
 
 function markMasterTabs() {
@@ -127,9 +167,9 @@ function markMasterTabs() {
 }
 
 function markActiveTab() {
-  const id = currentLocation ? currentLocation.id : null;
+  const group = currentLocation ? modeGroupOf(currentLocation) : null;
   tabs.querySelectorAll('.tab').forEach((b) => {
-    const on = b.dataset.id === id;
+    const on = b.dataset.modeGroup === group;
     b.classList.toggle('tab--active', on);
     b.setAttribute('aria-selected', on ? 'true' : 'false');
   });
@@ -158,6 +198,7 @@ function selectLocation(loc) {
     renderSubTabs();
   }
   markActiveTab();
+  renderModeToggle();
   // The template + variant just changed, so anything on screen is now stale.
   if (currentJtc) {
     renderLabelPreview(currentJtc, labelMount, currentLocation);
@@ -255,7 +296,7 @@ async function acceptScan(q) {
   input.value = record.jtcNo || q;
   // On a QR-gated tab the preview is driven by the binding list (selected item),
   // so DON'T renderLabel here — just stage it (avoids a second, conflicting draw).
-  if (!currentLocation?.requireQrBinding) renderLabel(record);
+  if (!hasBindingGate()) renderLabel(record);
   // A scan queues the print hands-free — no button press. (Manual lookups still
   // wait for the Print Label button.) On a QR tab this stages for binding instead.
   enqueuePrint(record.jtcNo || q, { fromScan: true });
@@ -448,7 +489,7 @@ async function selectJtc(jtcNo) {
     // QR-gated tab: ENTERING a JTC (typed + Enter, or a suggestion click) STAGES
     // it and lets the binding list drive the (single) preview — so don't renderLabel
     // here (that was the second, conflicting draw). Non-QR tabs render as before.
-    if (currentLocation?.requireQrBinding) {
+    if (hasBindingGate()) {
       enqueuePrint(record.jtcNo, { fromScan: false });
     } else {
       renderLabel(record);
@@ -519,7 +560,7 @@ let currentJtc = null;
 // Manual print: the button queues the currently-shown JTC. On a QR-gated tab it
 // instead releases the bound job (gated — disabled until both tags are scanned).
 printBtn.addEventListener('click', () => {
-  if (currentLocation?.requireQrBinding) { bindingReleasePrint(); return; }
+  if (hasBindingGate()) { bindingReleasePrint(); return; }
   if (!currentJtc) return;
   enqueuePrint(currentJtc, { fromScan: false });
 });
@@ -544,7 +585,9 @@ async function enqueuePrint(jtcNo, { fromScan } = {}) {
       // Select the just-staged job so its (single) preview shows and scans target it.
       if (body.id != null) selectedBindingId = body.id;
       bindingCleared = false;
-      setStatus('Staged — scan the Green (Start) and Red (End) QR tags to release the label.');
+      setStatus(body.bindingMode === 'rework'
+        ? 'Staged — scan the Black Rework QR (03xx) to release the label.'
+        : 'Staged — scan the Green (Start) and Red (End) QR tags to release the label.');
       await refreshBinding();
       return;
     }
@@ -633,7 +676,7 @@ clearBtn.addEventListener('click', () => {
   // Clear resets ONLY the JTC field + preview. It does NOT clear the binding queue —
   // staged jobs persist; on a QR tab this just deselects (blank preview, rows stay).
   // Remove staged jobs individually with the ✕ on each row.
-  if (currentLocation?.requireQrBinding) {
+  if (hasBindingGate()) {
     selectedBindingId = null;
     bindingCleared = true;
     refreshBinding();   // re-render the rows unselected
@@ -857,6 +900,8 @@ setInterval(refreshAuto, 5000);
  * SS=sequence; Start/End must share SS), which the scan handlers route here.
  */
 const bindingPanel = document.getElementById('bindingPanel');
+const bindingTitle = document.getElementById('bindingTitle');
+const bindingNote = document.getElementById('bindingNote');
 const bindingList = document.getElementById('bindingList');
 const bindingState = document.getElementById('bindingState');
 const bindingError = document.getElementById('bindingError');
@@ -864,11 +909,17 @@ const bindingError = document.getElementById('bindingError');
 // A QR workcell tag is a bare 4-digit number (WDSS). It only MEANS a binding scan
 // on a QR-gated tab — elsewhere 4 digits are just a normal search term.
 const QR_TOKEN_RE = /^\d{4}$/;
+const REWORK_QR_TOKEN_RE = /^03\d{2}$/;
 function isQrToken(v) {
-  return !!currentLocation?.requireQrBinding && QR_TOKEN_RE.test(String(v || '').trim());
+  const mode = bindingModeFor();
+  const value = String(v || '').trim();
+  return mode === 'rework'
+    ? REWORK_QR_TOKEN_RE.test(value)
+    : mode === 'normal' && QR_TOKEN_RE.test(value);
 }
 
 let bindingReleasing = false; // guards the one-shot auto-release on full binding
+let bindingAutoReleaseBlockedId = null; // stop repeated retries after a terminal binding error
 let selectedBindingId = null; // which staged item the preview + scan + print target
 let bindingCleared = false;   // Clear deselects (blank preview) without touching the queue
 let lastMaxBindingId = 0;     // detect newly-staged jobs (ids ascend) to re-surface them
@@ -878,7 +929,7 @@ function bindLocQuery() {
 }
 
 async function refreshBinding() {
-  if (!currentLocation?.requireQrBinding) { renderBinding([]); return; }
+  if (!hasBindingGate()) { renderBinding([]); return; }
   try {
     const r = await (await fetch('/api/binding' + bindLocQuery())).json();
     renderBinding(r.jobs || []);
@@ -887,17 +938,28 @@ async function refreshBinding() {
 
 function renderBinding(jobs) {
   // Non-QR tab (or none staged): keep the panel hidden and the Print button normal.
-  if (!currentLocation?.requireQrBinding) {
+  const mode = bindingModeFor();
+  const rework = mode === 'rework';
+  if (!mode) {
     bindingPanel.hidden = true;
     printBtn.disabled = false;
     printBtn.textContent = 'Print label';
     return;
   }
+  bindingTitle.textContent = rework ? 'Rework QR binding required' : 'QR binding required';
+  bindingNote.textContent = rework
+    ? 'Scan the Black Rework QR (03xx) to release this label.'
+    : 'Scan the workcell Green (Start) and Red (End) QR tags to release the label.';
   bindingPanel.hidden = jobs.length === 0;
 
   // A newly-staged job (ids ascend) re-surfaces the preview even after a Clear.
   const maxId = jobs.reduce((m, j) => Math.max(m, j.id), 0);
-  if (maxId > lastMaxBindingId) { lastMaxBindingId = maxId; bindingCleared = false; }
+  if (maxId > lastMaxBindingId) {
+    lastMaxBindingId = maxId;
+    bindingCleared = false;
+    bindingAutoReleaseBlockedId = null;
+    hideBindingError();
+  }
 
   // The SELECTED item drives everything (one preview, one scan/print target).
   // Default to the front item UNLESS the operator hit Clear (then nothing is
@@ -922,13 +984,17 @@ function renderBinding(jobs) {
 
   // Gate the Print button + header to the SELECTED item.
   if (sel) {
-    const complete = sel.boundStart && sel.boundEnd;
+    const complete = rework ? sel.boundRework : (sel.boundStart && sel.boundEnd);
     printBtn.disabled = !complete;
     printBtn.textContent = complete ? (sel.printed ? 'Reprint label' : 'Print label') : 'Scan QR to print';
-    const done = (sel.boundStart ? 1 : 0) + (sel.boundEnd ? 1 : 0);
+    const done = rework
+      ? (sel.boundRework ? 1 : 0)
+      : (sel.boundStart ? 1 : 0) + (sel.boundEnd ? 1 : 0);
     bindingState.textContent = sel.printed
       ? 'Sent to print queue'
-      : (done === 2 ? 'Ready' : done + '/2 tags scanned');
+      : (rework
+        ? (done === 1 ? 'Ready' : '0/1 tag scanned')
+        : (done === 2 ? 'Ready' : done + '/2 tags scanned'));
   } else {
     bindingState.textContent = '';
   }
@@ -973,10 +1039,14 @@ function renderBinding(jobs) {
       tasks.className = 'b-tasks';
       // Only the 2nd digit gates direction, so there's no fixed "expected" tag.
       // Show the actual scanned number under each pill once it's bound.
-      tasks.append(
-        taskPill('green', 'Green · Start', j.boundStart, j.startTag ? String(j.startTag) : ''),
-        taskPill('red', 'Red · End', j.boundEnd, j.endTag ? String(j.endTag) : '')
-      );
+      if (rework) {
+        tasks.append(taskPill('black', 'Black · Rework', j.boundRework, j.reworkQrId || ''));
+      } else {
+        tasks.append(
+          taskPill('green', 'Green · Start', j.boundStart, j.startTag ? String(j.startTag) : ''),
+          taskPill('red', 'Red · End', j.boundEnd, j.endTag ? String(j.endTag) : '')
+        );
+      }
       li.insertBefore(tasks, rm);
     }
     bindingList.appendChild(li);
@@ -984,7 +1054,7 @@ function renderBinding(jobs) {
 
   // Auto-release once the SELECTED item's tags are both in (hands-free path); the
   // Print button is the manual equivalent. The server's `printed` flag stops repeats.
-  if (sel && sel.boundStart && sel.boundEnd && !sel.printed && !bindingReleasing) {
+  if (sel && (rework ? sel.boundRework : (sel.boundStart && sel.boundEnd)) && !sel.printed && !bindingReleasing && bindingAutoReleaseBlockedId !== sel.id) {
     bindingReleasing = true;
     bindingReleasePrint().finally(() => { bindingReleasing = false; });
   }
@@ -1030,7 +1100,12 @@ async function bindingReleasePrint() {
       body: JSON.stringify({ location: currentLocation?.id, id: selectedBindingId }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!body.ok) { showBindingError(body.error || 'Could not release the label.'); return; }
+    if (!body.ok) {
+      if (body.alreadyBound) bindingAutoReleaseBlockedId = selectedBindingId;
+      showBindingError(body.error || 'Could not release the label.');
+      return;
+    }
+    bindingAutoReleaseBlockedId = null;
     hideBindingError();
     setStatus('QR bound — Work Order label sent to the print queue.');
     renderBinding(body.jobs || []);
@@ -1053,12 +1128,17 @@ async function removeBinding(id) {
   }
 }
 
+let bindingErrorTimer = null;
 function showBindingError(msg) {
-  bindingError.hidden = false;
-  bindingError.textContent = msg;
+  clearTimeout(bindingErrorTimer);
+ bindingError.hidden = false;
+ bindingError.textContent = msg;
+  bindingErrorTimer = setTimeout(hideBindingError, 5000);
 }
 function hideBindingError() {
-  bindingError.hidden = true;
+  clearTimeout(bindingErrorTimer);
+  bindingErrorTimer = null;
+ bindingError.hidden = true;
   bindingError.textContent = '';
 }
 

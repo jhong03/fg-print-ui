@@ -65,10 +65,14 @@ app.get('/api/locations', (req, res) => {
       id: l.id,
       name: l.name,
       group: l.group,
+      modeGroup: l.modeGroup,
+      mode: l.mode,
       templateId: l.templateId,
       variant: l.variant,
       // Tells the UI this tab gates printing behind a QR scan (task-list flow).
       requireQrBinding: l.requireQrBinding,
+      reworkQrBinding: l.reworkQrBinding,
+      bindingMode: l.bindingMode,
       // The workcell number, so the UI can show the expected tag (e.g. 21xx/22xx).
       qrWorkcell: l.qrWorkcell,
     }))
@@ -204,9 +208,9 @@ app.post('/api/print', async (req, res) => {
   }
   // QR-gated tab: don't print — STAGE the job for binding. It reaches the print
   // queue only after the operator scans this workcell's Green + Red QR tags.
-  if (loc.requireQrBinding) {
-    const b = bindingQueue.add(jtcToQueue, loc.id, sourceJtc);
-    return res.json({ success: true, binding: true, id: b.id, printJtc: jtcToQueue, sourceJtc });
+  if (loc.requireQrBinding || loc.reworkQrBinding) {
+    const b = bindingQueue.add(jtcToQueue, loc.id, sourceJtc, loc.bindingMode);
+    return res.json({ success: true, binding: true, bindingMode: loc.bindingMode, id: b.id, printJtc: jtcToQueue, sourceJtc });
   }
   const r = printQueue.add(jtcToQueue, loc.id, sourceJtc);
   res.json({
@@ -248,13 +252,13 @@ app.post('/api/binding/scan', (req, res) => {
   const loc = resolveLocation(req);
   const token = (req.body?.token || '').trim();
   if (!token) return res.status(400).json({ ok: false, error: 'Missing token' });
-  res.json(bindingQueue.scan(loc.id, token, req.body?.id));
+  res.json(bindingQueue.scan(loc.id, token, req.body?.id, loc.bindingMode));
 });
 // Release the selected item to the print queue — the gated print. Fails unless both
 // tags are bound (no bypass). Returns the binding list so the UI stays in sync.
 app.post('/api/binding/print', async (req, res) => {
   const loc = resolveLocation(req);
-  const r = await bindingQueue.releasePrint(loc.id, req.body?.id);
+  const r = await bindingQueue.releasePrint(loc.id, req.body?.id, loc.bindingMode);
   res.json({ ...r, jobs: bindingQueue.list(loc.id) });
 });
 app.post('/api/binding/remove', (req, res) => {
