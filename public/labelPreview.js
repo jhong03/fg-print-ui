@@ -12,6 +12,10 @@
   const NS = 'http://www.w3.org/2000/svg';
   // Approx TSC internal font cell heights (dots @203dpi).
   const FONT_H = { 1: 12, 2: 20, 3: 24, 4: 32, 5: 48 };
+  // A tab/job change can start another model request before the previous one
+  // finishes. Keep one request generation per mount so an older response can
+  // never append a second SVG after the newer preview.
+  const renderState = new WeakMap();
 
   function svgEl(name, attrs) {
     const e = document.createElementNS(NS, name);
@@ -20,23 +24,36 @@
   }
 
   async function renderLabelPreview(jtcNo, mount, location) {
+    const previous = renderState.get(mount);
+    previous?.controller.abort();
+    const controller = new AbortController();
+    const requestId = (previous?.requestId || 0) + 1;
+    renderState.set(mount, { controller, requestId });
     mount.textContent = '';
     let model;
     try {
       const loc = location ? '&location=' + encodeURIComponent(location.id) : '';
-      const res = await fetch('/api/label/model?no=' + encodeURIComponent(jtcNo) + loc);
+      const res = await fetch('/api/label/model?no=' + encodeURIComponent(jtcNo) + loc, {
+        signal: controller.signal,
+      });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
         throw new Error(b.error || 'model ' + res.status);
       }
       model = await res.json();
     } catch (e) {
+      if (e.name === 'AbortError') return null;
+      const current = renderState.get(mount);
+      if (!current || current.requestId !== requestId) return null;
       const p = document.createElement('div');
       p.className = 'labelmount__err';
       p.textContent = 'Label preview unavailable: ' + e.message;
       mount.appendChild(p);
       return null;
     }
+
+    const current = renderState.get(mount);
+    if (!current || current.requestId !== requestId) return null;
 
     const { widthDots, heightDots } = model.label;
     // Display is landscape: long side (heightDots) horizontal.

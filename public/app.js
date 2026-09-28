@@ -514,7 +514,7 @@ async function renderLabel(r) {
   // Draw the preview from the live template model so it matches the printed
   // label's geometry (positions + dimensions) for the selected destination.
   const model = await renderLabelPreview(currentJtc, labelMount, currentLocation);
-  showProvenance(model);
+  if (model) showProvenance(model);
 }
 
 // When the shown label was resolved from another JTC (Welding Leak-Test -> its
@@ -979,7 +979,8 @@ function renderBinding(jobs) {
     emptyState.hidden = true;
     label.hidden = false;
     actions.hidden = false;
-    renderLabelPreview(previewJtc, labelMount, currentLocation).then(showProvenance);
+    renderLabelPreview(previewJtc, labelMount, currentLocation)
+      .then((model) => { if (model) showProvenance(model); });
   }
 
   // Gate the Print button + header to the SELECTED item.
