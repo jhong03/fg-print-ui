@@ -9,9 +9,9 @@ const { resolveValue, placedElements, applyVariant, collapseModelRow } = require
 const { mapRecordToFields } = require('./mapRecord');
 const { layoutText } = require('./textLayout');
 const { hasBarcodeData, centeredBarcode } = require('./barcodeLayout');
+const { prepareSplitWorkOrder } = require('./splitWorkOrder');
 
 function buildModel(template, record, opts = {}) {
-  const values0 = mapRecordToFields(record);
   const L = template.label || {};
   const dpi = L.dpi || 203;
   const dotsPerMm = dpi / 25.4;
@@ -20,7 +20,8 @@ function buildModel(template, record, opts = {}) {
 
   // Same variant + model-row collapse the printer gets, so preview == print.
   const variantEls = applyVariant(template.elements || [], opts.variant);
-  const { elements: src, values } = collapseModelRow(variantEls, values0);
+  const split = prepareSplitWorkOrder(variantEls, mapRecordToFields(record, opts.templateId), opts.splitPart);
+  const { elements: src, values } = collapseModelRow(split.elements, split.values);
   // Wrap against the printed positions, exactly as renderTspl does, so the
   // preview's line breaks match the label's.
   const placed = placedElements(src, values);

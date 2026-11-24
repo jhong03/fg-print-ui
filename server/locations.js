@@ -17,8 +17,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const printerSettings = require('./printerSettings');
+const { fail } = require('./localStore');
+const { LocationConfig } = require('./locationConfig');
 
-const FILE = path.join(__dirname, '..', 'locations.json');
+const FILE = process.env.LOCATIONS_FILE || path.join(__dirname, '..', 'locations.json');
+const configuration = new LocationConfig(FILE);
 
 let cache = { mtimeMs: -1, raw: null };
 
@@ -125,12 +129,16 @@ function resolveEntry(entry, d) {
     mode,
     templateId: String(entry.templateId || d.templateId),
     printerType: String(entry.printerType || d.printerType),
+    printerId: entry.printerId ? String(entry.printerId) : null,
     agentUrl: String(entry.agentUrl || d.agentUrl).replace(/\/+$/, ''),
     variant,
     barcodeNudge: nudge,
     upright,
     models,
     weldingToPainting,
+    splitPartOneQty: entry.splitWoLabels === true && weldingToPainting && requireQrBinding && !reworkQrBinding && mode !== 'rework'
+      ? (Number.isInteger(entry.splitPartOneQty) && entry.splitPartOneQty >= 1 && entry.splitPartOneQty <= 49 ? entry.splitPartOneQty : 25)
+      : null,
     processCodePrepend,
     requireQrBinding,
     reworkQrBinding,
@@ -156,15 +164,22 @@ function defaultLocation(d) {
 function list() {
   const d = envDefaults();
   const raw = (readRaw() || []).filter((e) => e && e.id != null);
-  if (!raw.length) return [defaultLocation(d)];
-  return raw.map((e) => resolveEntry(e, d));
+  if (!raw.length) return [printerSettings.apply(defaultLocation(d))];
+  return raw.map((e) => printerSettings.apply(resolveEntry(e, d)));
 }
 
-// Resolve one destination by id. Falls back to the first tab when the id is
-// missing or unknown, so a stale bookmark never dead-ends a print.
+// Missing selections use the first label. A removed explicit ID must never
+// silently redirect a stale operator window to another label/printer.
 function get(id) {
   const all = list();
-  return all.find((l) => l.id === id) || all[0];
+  if (!id) return all[0];
+  const found = all.find((l) => l.id === id);
+  if (!found) throw fail('This label no longer exists. Refresh the operator screen.', 404);
+  return found;
 }
 
-module.exports = { list, get };
+function assertUnchanged(location) {
+  if (JSON.stringify(get(location.id)) !== JSON.stringify(location)) throw fail('This label configuration changed. Refresh the operator screen and try again.', 409);
+}
+function invalidate() { cache = { mtimeMs: -1, raw: null }; }
+module.exports = { list, get, configuration, invalidate, envDefaults, resolveEntry, assertUnchanged };

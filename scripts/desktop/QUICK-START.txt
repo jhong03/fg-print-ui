@@ -1,0 +1,76 @@
+LABEL PRINTER - WINDOWS x64
+
+UNZIP AND RUN
+Right-click the ZIP and choose "Extract All". Keep the entire extracted
+"Label Printer" folder together, then double-click "Label Printer.exe" inside it.
+Do not run the EXE from inside the ZIP or copy only the EXE.
+No Node.js, npm, browser or app installation is needed.
+
+FIRST-TIME PRINTER SETUP
+1. Keep this whole folder together. Node.js and both applications are included.
+2. Stop older standalone print-agent / fg-print-ui services on ports 9000 / 3000.
+3. Double-click "Label Printer.exe". The operator screen opens inside the Label Printer
+   desktop window. No external browser is opened or required.
+4. Open Printer settings. Use the sidebar to switch sections. The agent connection
+   and unique terminal ID are automatic under Terminal & agent.
+5. Add your printers, choose the correct printer language and connection, select a
+   default printer, then click "Save terminal and printers".
+6. Check status and test print with suitable media. TSPL tests use a 50 x 30 mm label.
+7. Assign each label to its printer and click "Save label assignments". Set the
+   group/individual Show checkboxes and click "Save visibility".
+8. To edit label definitions, open "Label configuration" from the File menu or
+   the link at the top of Printer settings. Choose a label and edit its models,
+   Normal/Rework mode, QR binding, template, job filters or layout. Click "Save
+   label configuration", then return to printing. You can add, duplicate, remove
+   and reorder labels here without editing JSON or source code.
+9. Open Auto Print in the sidebar (or File menu), choose the labels this computer
+   should watch, set the check interval, enable it and click Save Auto Print.
+   Selected labels need model filters. Rework stays manual; QR-gated labels still
+   wait for scans. Changes apply immediately. Enabling starts with new completions
+   rather than replaying old jobs. Switching it off leaves queued jobs in place.
+
+For USB printers: install their Windows driver and enable printer sharing first.
+Use the exact Windows share name. For TCP: enter the printer IP and its RAW TCP
+port, usually 9100. Current production labels require TSPL support. ESC/POS
+printers can be configured and tested but are not used by current label layouts.
+
+The package includes the current plant database/MES connection defaults and label
+definitions. It starts with no printers, assignments, production queues or copied
+management token. The plant network is still needed for production data/templates.
+Automatic job detection follows the existing plant configuration.
+After the first Auto Print save, the app's saved settings override its initial
+plant defaults. The completion history and printed-job IDs are preserved.
+
+Settings and queues: %LOCALAPPDATA%\FGPrint
+Service logs:        %LOCALAPPDATA%\FGPrint\logs\services.log
+These are per Windows user, remain after exit, and are not erased by app upgrades.
+The launcher generates a unique terminal ID and local management token on first use.
+The existing FGPrint data-folder name is retained so saved settings and queues
+continue to work after the app is renamed.
+Label definitions: %LOCALAPPDATA%\FGPrint\ui\locations.json
+The previous saved definitions are backed up as locations.json.bak. Pending QR
+binding lists must be finished and cleared before changing those labels. Labels
+with queued prints cannot be removed. Existing queued prints keep their settings.
+Do not copy the data folder to another terminal: it contains device identity/jobs.
+Back up this folder before replacing or migrating an existing production terminal.
+
+Close the app and confirm Exit to stop both services. The File menu also provides
+Printing screen, Printer settings, Open logs folder and Exit.
+Terminal/relay/agent-port changes require closing and reopening the app.
+Printer/assignment changes apply to new jobs. Pending jobs retain their targets.
+Do not run the packaged app and the old standalone services on the same ports.
+
+Windows 10/11 x64 with PowerShell is required. Windows
+printer drivers must be installed separately. No Node.js/npm installation needed.
+Electron's rendering engine is bundled inside the application. This is a portable
+app folder, not an installer or Windows background service.
+No automatic startup or existing service changes are made by this package.
+
+PRIVATE PLANT BUILD: defaults\ui.env contains the current database connection
+settings, including credentials. Share this package only with approved terminals.
+It is not a public distribution. The interface does not receive those credentials.
+Third-party dependency license notices remain in the bundled node_modules folders.
+
+Updating: build/copy a NEW app folder, stop the old app, and open the new EXE.
+Existing settings/data are retained. Seed defaults do not overwrite saved settings.
+The original source checkouts are independent and are not required to launch.

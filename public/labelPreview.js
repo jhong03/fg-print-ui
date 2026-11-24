@@ -23,7 +23,7 @@
     return e;
   }
 
-  async function renderLabelPreview(jtcNo, mount, location) {
+  async function renderLabelPreview(jtcNo, mount, location, splitQuery = '') {
     const previous = renderState.get(mount);
     previous?.controller.abort();
     const controller = new AbortController();
@@ -33,7 +33,7 @@
     let model;
     try {
       const loc = location ? '&location=' + encodeURIComponent(location.id) : '';
-      const res = await fetch('/api/label/model?no=' + encodeURIComponent(jtcNo) + loc, {
+      const res = await fetch('/api/label/model?no=' + encodeURIComponent(jtcNo) + loc + splitQuery, {
         signal: controller.signal,
       });
       if (!res.ok) {

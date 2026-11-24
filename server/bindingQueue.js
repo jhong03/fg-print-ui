@@ -17,22 +17,22 @@
  *
  * Model: one job runs per workcell, so a location has ONE active (front) item;
  * further triggers queue BEHIND it and only become active once the front item is
- * cleared/removed. The scan flags live only in memory (transient unlock); the item
- * list is PERSISTED so a restart never loses a staged job.
+ * cleared/removed. The staged jobs and their scans survive restart.
  *
  * On full binding the item is handed to the existing print queue (printQueue.add),
  * inheriting all of its resilience — nothing about printing changes here.
  */
 
 const fs = require('node:fs');
-const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 
 const printQueue = require('./printQueue');
 const db = require('./db');
 const qrLink = require('./qrLink');
 const reworkQrLink = require('./reworkQrLink');
 
-const FILE = path.join(__dirname, '..', 'binding-jobs.json');
+const { fileFor, atomicWrite, fail } = require('./localStore');
+const FILE = fileFor('binding-jobs.json');
 
 let jobs = [];
 let seq = 0;
@@ -40,19 +40,25 @@ let seq = 0;
 // ---- persistence ----------------------------------------------------------
 function persist() {
   try {
-    fs.writeFileSync(FILE, JSON.stringify({ jobs }, null, 2));
+    atomicWrite(FILE, { jobs });
   } catch (err) {
     console.error('[binding] could not persist:', err.message);
   }
 }
 
+function saveSplit(next) {
+  atomicWrite(FILE, { jobs: next });
+  jobs = next;
+}
+
 function load() {
   try {
     const saved = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    jobs = Array.isArray(saved.jobs) ? saved.jobs : [];
+    if (!Array.isArray(saved.jobs)) throw new Error('Invalid saved QR binding queue');
+    jobs = saved.jobs;
     seq = jobs.reduce((m, j) => Math.max(m, Number(j.id) || 0), 0);
-  } catch (_) {
-    jobs = [];
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
   }
 }
 
@@ -72,7 +78,7 @@ function decode(token) {
 // selection just chooses which staged job the preview/scan/print apply to.
 function itemFor(location, id, mode) {
   const forLoc = jobs.filter((j) =>
-    j.location === location && (!mode || (j.bindingMode || 'normal') === mode)
+    !j.dismissed && j.location === location && (!mode || (j.bindingMode || 'normal') === mode)
   );
   if (id != null && id !== '') {
     return forLoc.find((j) => j.id === Number(id)) || null;
@@ -83,7 +89,7 @@ function itemFor(location, id, mode) {
 // Public snapshot for the UI, per location: the active item is marked so the
 // front-end shows its checklist; the rest render as "waiting".
 function list(location) {
-  const forLoc = location ? jobs.filter((j) => j.location === location) : jobs;
+  const forLoc = jobs.filter((j) => !j.dismissed && (!location || j.location === location));
   const activeId = location && forLoc.length ? forLoc[0].id : null;
   return forLoc.map((j) => ({
     id: j.id,
@@ -98,6 +104,10 @@ function list(location) {
     startTag: j.startTag || null,
     endTag: j.endTag || null,
     printed: !!j.printed,
+    ...(j.parts ? {
+      currentPart: j.parts.find((part) => part.printJobId == null)?.number ?? null,
+      parts: j.parts.map(({ number, qty, startTag, endTag, printJobId }) => ({ number, qty, startTag, endTag, printJobId })),
+    } : {}),
     active: j.id === activeId,
   }));
 }
@@ -106,15 +116,16 @@ function list(location) {
 // Stage a job for binding. Deduped by paintingJtc+location so the auto-trigger and
 // a manual scan of the same JTC don't create two rows. Returns the (existing or
 // new) item's public shape.
-function add(paintingJtc, location, sourceJtc, bindingMode = 'normal') {
+function add(paintingJtc, location, sourceJtc, bindingMode = 'normal', splitPartOneQty = null) {
   const jtc = String(paintingJtc || '').trim();
   const mode = bindingMode === 'rework' ? 'rework' : 'normal';
   const existing = jobs.find((j) =>
     j.location === location &&
-    j.paintingJtc === jtc &&
+    (j.paintingJtc === jtc || (j.parts && sourceJtc && j.sourceJtc === sourceJtc)) &&
     (j.bindingMode || 'normal') === mode &&
-    !j.printed
+    (!j.printed || j.parts)
   );
+  if (existing?.dismissed) throw fail('Both QR pairs for this Painting job were already queued. Check the print queue.', 409);
   if (existing) return list(location).find((x) => x.id === existing.id);
   const job = {
     id: ++seq,
@@ -129,15 +140,22 @@ function add(paintingJtc, location, sourceJtc, bindingMode = 'normal') {
     printed: false,
     at: Date.now(),
   };
-  jobs.push(job);
-  persist();
+  if (mode === 'normal' && splitPartOneQty != null) {
+    job.parts = [splitPartOneQty, 50 - splitPartOneQty].map((qty, index) => ({
+      number: index + 1, qty, startTag: null, endTag: null, printJobId: null, releaseKey: randomUUID(),
+    }));
+    saveSplit([...jobs, job]);
+  } else {
+    jobs.push(job);
+    persist();
+  }
   return list(location).find((x) => x.id === job.id);
 }
 
 // Validate a scanned token against the ACTIVE item's workcell tags and record the
 // Start/End bind. Returns { ok, role?, error?, item? }. Never throws on a bad scan
 // — a mismatch is a normal, retryable outcome (no lockout).
-function scan(location, token, id, bindingMode = 'normal') {
+function scan(location, token, id, bindingMode = 'normal', partNumber) {
   const mode = bindingMode === 'rework' ? 'rework' : 'normal';
   const item = itemFor(location, id, mode);
   if (!item) return { ok: false, error: 'No job is waiting for QR binding on this station.' };
@@ -156,6 +174,15 @@ function scan(location, token, id, bindingMode = 'normal') {
   if (!d) {
     return { ok: false, error: 'Unrecognised QR tag — expected a 4-digit tag (2nd digit 1 = Start, 2 = End).', item: snap() };
   }
+  if (item.parts) {
+    const part = item.parts.find((p) => p.printJobId == null);
+    if (!part) return { ok: false, error: 'Both QR pairs have already been queued.' };
+    if (part.number !== partNumber) return { ok: false, error: 'The active QR pair changed. Check the screen and scan again.' };
+    if (part.startTag && part.endTag) return { ok: false, error: 'This pair is complete. Queue its label before scanning more tags.' };
+    const next = { ...part, [d.dir === 'start' ? 'startTag' : 'endTag']: d.tag };
+    saveSplit(jobs.map((j) => j !== item ? j : { ...j, parts: j.parts.map((p) => p === part ? next : p) }));
+    return { ok: true, role: d.dir, tag: d.tag, item: snap() };
+  }
   // Only the direction (2nd digit) gates. Rescanning the same colour replaces its tag.
   if (d.dir === 'start') { item.startTag = d.tag; item.boundStart = true; }
   else { item.endTag = d.tag; item.boundEnd = true; }
@@ -167,10 +194,25 @@ function scan(location, token, id, bindingMode = 'normal') {
 // when both Green and Red are bound (the compliance gate; there is no bypass). The
 // item STAYS (printed=true) so the preview persists until the operator clears it,
 // and a manual re-click reprints. Returns { ok, error?, queued? }.
-async function releasePrint(location, id, bindingMode = 'normal') {
+async function releasePrint(location, id, bindingMode = 'normal', partNumber) {
   const mode = bindingMode === 'rework' ? 'rework' : 'normal';
   const item = itemFor(location, id, mode);
   if (!item) return { ok: false, error: 'No job is waiting for QR binding on this station.' };
+  if (item.parts) {
+    const part = item.parts.find((p) => p.number === partNumber);
+    if (!part) return { ok: false, error: 'Select the active QR pair before releasing its label.' };
+    if (part.printJobId != null) return { ok: true, queued: true, id: part.printJobId, partNumber };
+    if (part !== item.parts.find((p) => p.printJobId == null) || !part.startTag || !part.endTag) {
+      return { ok: false, error: 'Scan both QR tags for the active pair before printing.' };
+    }
+    const { number, qty, releaseKey } = part;
+    const result = printQueue.add(item.paintingJtc, item.location, item.sourceJtc, { number, qty, releaseKey });
+    const parts = item.parts.map((p) => p === part ? { ...p, printJobId: result.id } : p);
+    saveSplit(jobs.map((j) => j !== item ? j : { ...j, parts, printed: parts.every((p) => p.printJobId != null) }));
+    logBinding(item.paintingJtc, part.startTag, part.endTag, number)
+      .catch((e) => console.error('[binding] qrLink error:', e.message));
+    return { ok: true, queued: true, ...result, partNumber };
+  }
   if (mode === 'rework') {
     if (!item.boundRework) {
       return { ok: false, error: 'Scan the Black Rework QR before printing.' };
@@ -220,38 +262,49 @@ async function releasePrint(location, id, bindingMode = 'normal') {
   // Log the QR<->JTC bind to Postgres on the FIRST release only (a reprint doesn't
   // duplicate the row). Best-effort: never let an audit-DB hiccup block the print.
   if (firstRelease) {
-    logBinding(item).catch((e) => console.error('[binding] qrLink error:', e.message));
+    logBinding(item.paintingJtc, item.startTag, item.endTag)
+      .catch((e) => console.error('[binding] qrLink error:', e.message));
   }
   return { ok: true, queued: true, id: r.id, position: r.position, paused: r.paused };
 }
 
 // Resolve the printed painting JTC's Job.Id and write the QR bind row, using the
 // actual scanned tags (e.g. 2101 / 2201) exactly as they came in.
-async function logBinding(item) {
+async function logBinding(paintingJtc, qrStart, qrEnd, pairNumber) {
   let barcodeId = null;
   try {
-    const rec = await db.getOne(item.paintingJtc);
+    const rec = await db.getOne(paintingJtc);
     barcodeId = rec && rec.barcodeId != null ? Number(rec.barcodeId) : null;
   } catch (e) {
-    console.error('[binding] could not resolve Job.Id for', item.paintingJtc, '-', e.message);
+    console.error('[binding] could not resolve Job.Id for', paintingJtc, '-', e.message);
   }
   if (barcodeId == null) {
-    console.warn('[binding] no Job.Id for', item.paintingJtc, '- skipping qrLink write');
+    console.warn('[binding] no Job.Id for', paintingJtc, '- skipping qrLink write');
     return;
   }
-  const res = await qrLink.record({ jtcBarcodeId: barcodeId, qrStart: item.startTag, qrEnd: item.endTag });
-  if (res.ok) console.log(`[binding] logged qr_jtc_link #${res.id}: barcode=${barcodeId} start=${item.startTag} end=${item.endTag}`);
+  const res = await qrLink.record({ jtcBarcodeId: barcodeId, qrStart, qrEnd, pairNumber });
+  if (res.ok) console.log(`[binding] logged qr_jtc_link #${res.id}: barcode=${barcodeId} start=${qrStart} end=${qrEnd}${pairNumber == null ? '' : ' pair=' + pairNumber}`);
 }
 
-function remove(id) {
-  jobs = jobs.filter((j) => j.id !== Number(id));
-  persist();
+function remove(id, location) {
+  const item = itemFor(location, id);
+  if (id != null && id !== '' && item) removeItems((j) => j === item);
 }
 
 // Clear all staged bindings for a location (the operator's "Clear").
 function clear(location) {
-  jobs = location ? jobs.filter((j) => j.location !== location) : [];
-  persist();
+  removeItems((j) => !location || j.location === location);
+}
+
+function removeItems(matches) {
+  if (jobs.some((j) => matches(j) && j.parts && !j.printed && j.parts.some((p) => p.printJobId != null || printQueue.findSplitPrint(p.releaseKey)))) {
+    throw fail('Finish both QR pairs before clearing this job.', 409);
+  }
+  // Keep a completed split's identity so rescanning it cannot create more labels.
+  saveSplit(jobs.flatMap((j) => {
+    if (!matches(j)) return [j];
+    return j.parts && j.printed ? [{ ...j, dismissed: true }] : [];
+  }));
 }
 
 load();

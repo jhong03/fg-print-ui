@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Printer settings</title>
+  <link rel="stylesheet" href="styles.css?v=20" />
+  <link rel="stylesheet" href="settings.css?v=8" />
+</head>
+<body>
+  <div class="settings-shell">
+  <aside class="settings-sidebar">
+    <div class="settings-brand">Label Printer<span>Settings</span></div>
+    <nav class="settings-nav" aria-label="Settings sections">
+      <a href="#printers" data-settings-nav="printers" aria-label="Printers">Printers<span>Devices and connections</span></a>
+      <a href="#assignments" data-settings-nav="assignments" aria-label="Label assignments">Label assignments<span>Printers and visibility</span></a>
+      <a href="#labels" data-settings-nav="labels" aria-label="Label configuration">Label configuration<span>Models, modes and QR rules</span></a>
+      <a href="#auto" data-settings-nav="auto" aria-label="Auto Print">Auto Print<span>Completion watching</span></a>
+      <a href="#terminal" data-settings-nav="terminal" aria-label="Terminal and agent">Terminal &amp; agent<span>This computer's connection</span></a>
+    </nav>
+    <p class="sidebar-help">Changes stay on this computer.</p>
+  </aside>
+  <main class="settings-page">
+    <header class="settings-header">
+      <div><a href="/">← Back to printing</a><h1 id="settingsPageHeading">Printers</h1><p id="settingsPageDescription">Add printers and choose their connections.</p></div>
+      <button id="reloadSettings" class="btn btn--ghost" type="button">Reload settings</button>
+    </header>
+    <p id="settingsStatus" class="settings-status" role="status">Connecting to print-agent…</p>
+
+    <section class="settings-section" aria-labelledby="agentHeading" data-settings-panel="terminal" hidden>
+      <h2 id="agentHeading">Print agent</h2>
+      <p id="agentConnection">Checking connection…</p>
+      <details>
+        <summary>Agent connection</summary>
+        <form id="connectionForm" class="connection-form">
+          <label>Local agent address<input id="agentAddress" type="url" required placeholder="http://localhost:9000" /></label>
+          <button class="btn btn--sm" type="submit">Connect</button>
+        </form>
+        <p class="help">Manage the print-agent on this computer. If you change its port, restart print-agent and connect to the new address here.</p>
+      </details>
+    </section>
+
+    <form id="agentForm">
+      <fieldset id="agentFields" disabled>
+        <section class="settings-section" data-settings-panel="terminal" hidden>
+          <h2>Terminal</h2>
+          <div class="settings-grid">
+            <label>Terminal ID<input id="terminalId" required maxlength="128" /></label>
+            <label>Relay address<input id="relayAddress" type="url" placeholder="ws://server:3001" /></label>
+          </div>
+          <details>
+            <summary>Advanced terminal settings</summary>
+            <div class="settings-grid">
+              <label>Agent HTTP port<input id="agentPort" type="number" min="1" max="65535" required /></label>
+              <label>Scale port <span class="help">optional</span><input id="scalePort" placeholder="COM7" /></label>
+              <label>Scale baud rate<input id="scaleBaud" type="number" min="1" value="9600" /></label>
+              <label class="checkbox-label"><input id="scaleAuto" type="checkbox" /> Scale auto mode</label>
+            </div>
+          </details>
+          <p class="help">Terminal, relay, HTTP port and scale changes take effect after restarting print-agent. Printer changes apply to new jobs immediately.</p>
+          <p id="restartNotice" class="restart-notice" hidden></p>
+          <button type="submit" class="btn">Save terminal and printers</button>
+        </section>
+
+        <section class="settings-section" data-settings-panel="printers">
+          <div class="section-heading"><h2>Printers</h2><button id="discoverPrinters" type="button" class="btn btn--sm btn--ghost">Find Windows printers</button></div>
+          <p class="help">TSPL prints the current label templates. ESC/POS is available for receipt printers and connection tests.</p>
+          <p id="discoveryStatus" class="help" role="status"></p>
+          <datalist id="windowsShares"></datalist>
+          <div id="printersList"></div>
+          <button id="addPrinter" type="button" class="btn btn--sm btn--ghost">Add printer</button>
+          <label class="default-printer">Default printer<select id="defaultPrinter"></select></label>
+          <button type="submit" class="btn">Save terminal and printers</button>
+        </section>
+      </fieldset>
+    </form>
+
+    <section class="settings-section" data-settings-panel="assignments" hidden>
+      <h2 id="assignmentsHeading">Label assignments</h2>
+      <p class="help">Choose which groups and labels appear on this computer's operator screen. A group must be shown for its selected labels to appear. Individual choices are remembered when a group is hidden.</p>
+      <form id="visibilityForm">
+        <fieldset id="visibilityFields" disabled>
+          <div id="groupVisibilityList" class="group-visibility-list"></div>
+          <button type="submit" class="btn btn--sm btn--ghost">Save visibility</button>
+        </fieldset>
+      </form>
+      <p class="help">Only enabled TSPL printers can print these labels. New assignments apply to new jobs; waiting jobs keep their original printer.</p>
+      <form id="assignmentsForm">
+        <fieldset id="assignmentFields" disabled><div id="assignmentsList"></div><button type="submit" class="btn">Save label assignments</button></fieldset>
+      </form>
+    </section>
+    <section class="settings-section" aria-labelledby="labelConfigHeading" data-settings-panel="labels" hidden>
+      <h2 id="labelConfigHeading">Label configuration</h2>
+      <p class="help">Edit this computer's labels, model filters and printing flow here. Changes are saved to its locations.json and apply to new jobs. Finish and clear a label's QR binding list before changing it.</p>
+      <p id="labelConfigStatus" class="settings-status" role="status">Loading label configuration…</p>
+      <form id="labelConfigForm">
+        <fieldset id="labelConfigFields" disabled>
+          <div class="label-config-toolbar">
+            <label>Label<select id="labelConfigSelect"></select></label>
+            <div class="printer-actions">
+              <button type="button" id="addLabel" class="btn btn--sm btn--ghost">Add label</button>
+              <button type="button" id="duplicateLabel" class="btn btn--sm btn--ghost">Duplicate label</button>
+              <button type="button" id="removeLabel" class="btn btn--sm btn--ghost">Remove label</button>
+              <button type="button" id="labelMoveUp" class="btn btn--sm btn--ghost">Move up</button>
+              <button type="button" id="labelMoveDown" class="btn btn--sm btn--ghost">Move down</button>
+            </div>
+          </div>
+          <div id="labelEditor">
+            <h3>Label and models</h3>
+            <div class="settings-grid">
+              <label>Label ID<input data-label-field="id" required pattern="[a-zA-Z0-9_-]{1,128}" maxlength="128" /><span class="help">Saved IDs stay fixed to keep assignments and jobs linked.</span></label>
+              <label>Label name<input data-label-field="name" required maxlength="256" /></label>
+              <label>Group<input data-label-field="group" maxlength="256" placeholder="P1 or P3" /></label>
+              <label>Template ID<input data-label-field="templateId" maxlength="128" pattern="[a-zA-Z0-9_-]+" /><span class="help">Blank uses this terminal's default template.</span></label>
+              <label class="label-config-wide">Models<textarea data-label-field="models" rows="2" placeholder="K2VG, K2SA"></textarea><span class="help">Separate models with commas or new lines. Blank allows all models for manual lookup. Choose watched labels in Auto Print.</span></label>
+              <label>Mode<select data-label-field="mode"><option value="">No mode toggle</option><option value="normal">Normal</option><option value="rework">Rework</option></select></label>
+              <label>Mode group<input data-label-field="modeGroup" maxlength="256" placeholder="work-order-p3-k2vg" /><span class="help">Use the same key for one Normal and one Rework label in the same group. They appear as one page with a mode switch.</span></label>
+            </div>
+            <h3>QR binding and job flow</h3>
+            <div class="settings-grid">
+              <div class="setting-option"><label class="checkbox-label"><input data-label-field="requireQrBinding" type="checkbox" aria-describedby="greenRedHelp" />Require Green Start + Red End QR</label><p id="greenRedHelp" class="help">Waits for both Green Start and Red End QR scans before releasing the label.</p></div>
+              <div class="setting-option"><label class="checkbox-label"><input data-label-field="reworkQrBinding" type="checkbox" aria-describedby="reworkHelp" />Require Black Rework QR</label><p id="reworkHelp" class="help">Waits for a Black Rework QR (03xx) scan before releasing the rework label.</p></div>
+              <p class="help label-config-wide">Untick the selected QR option to switch. Leave both unticked for no QR binding.</p>
+              <div class="setting-option"><label class="checkbox-label"><input data-label-field="weldingToPainting" type="checkbox" aria-describedby="paintingFlowHelp" />Leak Test → Painting label</label><p id="paintingFlowHelp" class="help">Uses the Leak Test job's linked Painting job for the label. When off, uses the entered job.</p></div>
+              <div class="setting-option"><label class="checkbox-label"><input data-label-field="doneOnly" type="checkbox" aria-describedby="completedJobsHelp" />Completed jobs only</label><p id="completedJobsHelp" class="help">Only lists and prints jobs marked completed in the database. Untick to also allow unfinished jobs.</p></div>
+              <div class="setting-option"><label class="checkbox-label"><input data-label-field="splitWoLabels" type="checkbox" aria-describedby="splitWoHelp" />Split into two WO labels</label><p id="splitWoHelp" class="help">Requires Green/Red QR binding and Leak Test → Painting. Scan both tags for each label. The same codes can be reused.</p></div>
+              <label>Part 1 quantity<input data-label-field="splitPartOneQty" type="number" min="1" max="49" step="1" aria-describedby="splitQtyHelp" /><span id="splitQtyHelp" class="help" aria-live="polite">Part 2 quantity: 25 (total: 50)</span></label>
+              <label>Process code prefix<input data-label-field="processCodePrepend" maxlength="256" placeholder="SB" aria-describedby="processCodeHelp" /><span id="processCodeHelp" class="help">Adds a prefix to the Painting label's process code (e.g. PL → SB, PL). Blank keeps the original code. Requires Leak Test → Painting.</span></label>
+              <div><label for="stockLocation">Stock location<select id="stockLocation" data-label-field="toLocation" aria-describedby="stockLocationHelp stockLocationStatus"><option value="">Any location</option></select></label><p id="stockLocationHelp" class="help">Only accepts jobs assigned to this stock location. Choose Any location to allow all locations.</p><p id="stockLocationStatus" class="help" role="status">Loading active stock locations…</p><button type="button" id="reloadStockLocations" class="btn btn--sm btn--ghost">Refresh locations</button></div>
+              <label class="label-config-wide">QR workcell reference<input data-label-field="qrWorkcell" maxlength="256" aria-describedby="qrWorkcellHelp" /><span id="qrWorkcellHelp" class="help">Optional note to identify the workcell. This does not change which QR tags the scanner accepts.</span></label>
+            </div>
+            <details>
+              <summary>Label layout</summary>
+              <div class="settings-grid">
+                <label>Variant<select data-label-field="variant"><option value="">Terminal default</option><option value="qc">QC</option><option value="plain">Plain</option></select></label>
+                <label>Barcode horizontal nudge (dots)<input data-label-field="barcodeNudge" type="number" min="-10000" max="10000" step="1" /><span class="help">Positive moves right; negative moves left. Blank uses the terminal default.</span></label>
+                <label class="checkbox-label"><input data-label-field="upright" type="checkbox" />Print upright</label>
+                <label class="checkbox-label"><input data-label-field="boldTitle" type="checkbox" />Bold title</label>
+                <label class="label-config-wide">Additional bold text or field keys<textarea data-label-field="boldText" rows="2"></textarea><span class="help">One exact text value or template field key per line.</span></label>
+              </div>
+            </details>
+            <details>
+              <summary>Advanced printer routing</summary>
+              <p class="help">Normally choose printers under Label assignments above. These are the original per-label routing overrides; saved local assignments take priority.</p>
+              <div class="settings-grid">
+                <label>Agent address override<input data-label-field="agentUrl" type="url" /></label>
+                <label>Printer ID fallback<input data-label-field="printerId" maxlength="256" /></label>
+                <label>Legacy printer type<select data-label-field="printerType"><option value="">Terminal default</option><option value="tsc">TSC / TSPL</option><option value="hprt">HPRT / ESC/POS</option></select><span class="help">Current production templates require an enabled TSPL printer.</span></label>
+              </div>
+            </details>
+          </div>
+          <div class="printer-actions label-config-actions">
+            <button type="submit" class="btn">Save label configuration</button>
+            <button type="button" id="reloadLabelConfig" class="btn btn--ghost">Discard label edits</button>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+    <section class="settings-section" data-settings-panel="auto" aria-labelledby="autoPrintHeading" hidden>
+      <h2 id="autoPrintHeading">Auto Print</h2>
+      <p class="help">Watch newly completed jobs for the labels handled by this computer. Labels requiring Green/Red QR scans still wait for binding. Rework stays manual.</p>
+      <p id="autoPrintMessage" class="settings-status" role="status">Loading Auto Print settings…</p>
+      <form id="autoPrintForm">
+        <fieldset id="autoPrintFields" disabled>
+          <label class="auto-print-toggle checkbox-label"><input id="autoPrintEnabled" type="checkbox" />Enable Auto Print on this computer</label>
+          <label class="auto-print-interval">Check for completed jobs every (seconds)<input id="autoPrintSeconds" type="number" min="1" max="300" step="1" required value="15" /></label>
+          <h3>Labels watched by this computer</h3>
+          <p class="help">Choose one destination per model. Set models in Label configuration before selecting a label here. Hidden labels can still be watched.</p>
+          <div id="autoPrintLabels" class="auto-print-labels"></div>
+          <p class="help">Enabling Auto Print or adding watched labels starts with new completions; it does not print earlier completed jobs. Turning it off leaves already queued jobs in their queues.</p>
+          <div class="printer-actions"><button type="submit" class="btn">Save Auto Print</button><button id="reloadAutoPrint" type="button" class="btn btn--ghost">Reload Auto Print</button></div>
+        </fieldset>
+      </form>
+      <div class="auto-print-runtime" aria-live="polite">
+        <h3>Watcher status</h3>
+        <dl><div><dt>Status</dt><dd id="autoPrintState">Checking…</dd></div><div><dt>Last check</dt><dd id="autoPrintLastCheck">—</dd></div><div><dt>Last job</dt><dd id="autoPrintLastJob">—</dd></div></dl>
+        <p id="autoPrintError" class="printer-result error" hidden></p>
+      </div>
+    </section>
+  </main>
+  </div>
+  <script src="settings-navigation.js?v=1"></script>
+  <script src="printer-status-message.js?v=1"></script>
+  <script src="settings.js?v=6"></script>
+  <script src="label-settings.js?v=5"></script>
+  <script src="auto-print-settings.js?v=1"></script>
+</body>
+</html>

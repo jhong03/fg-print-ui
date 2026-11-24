@@ -67,9 +67,8 @@ module.exports = {
   //   coNo      = CustomerOrder.OrderNumber (C/O No) via
   //               Job.COItemId -> CustomerOrderItem -> CustomerOrder
   // coNo is LEFT JOINed, so make-to-stock jobs (no customer order) blank it.
-  // jtcNo (Job.OrderNumber) and coNo are DISTINCT — the C/O No is never the JTC
-  // No. NOTE: mapRecord carries jtcNo in the `woNumber` field key and coNo in
-  // `coNumber` (that's how the MES template binds "JTC No" and "C/O No").
+  // Keep jtcNo (Job.OrderNumber) and coNo separate. Template 1 uses coNo for
+  // W.O. NO. and jtcNo for JTC NO. via the label field mapper.
   // Tables are dbo.* — the pool connects to MSSQL_DATABASE.
   mssql: (() => {
     // Shared SELECT list + FROM/JOINs so getOne and getCompletedSince always
@@ -192,6 +191,12 @@ module.exports = {
       // Seed the watermark on first run: the newest completion that ALREADY
       // exists, so the watcher only acts on jobs that finish AFTER it starts.
       latestCompletion: `SELECT MAX(j.ActualEndDate) AS m FROM dbo.Job j`,
+      stockLocations: `
+        SELECT Id AS id, Name AS name, Code AS code
+        FROM dbo.StockLocation
+        WHERE Active = 1
+        ORDER BY Name, Code, Id
+      `,
     };
   })(),
 

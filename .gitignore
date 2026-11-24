@@ -4,4 +4,10 @@ npm-debug.log*
 # Per-machine runtime state — auto-generated, must never be committed
 print-jobs.json
 auto-print-state.json
+auto-print-settings.json
+auto-print-settings.json.bak
 binding-jobs.json
+printer-settings.json
+locations.json.bak
+*.json.*.tmp
+/.build/

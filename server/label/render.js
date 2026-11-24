@@ -17,6 +17,7 @@
 
 const { layoutText } = require('./textLayout');
 const { hasBarcodeData, centeredBarcode } = require('./barcodeLayout');
+const { prepareSplitWorkOrder } = require('./splitWorkOrder');
 
 function resolveValue(el, values) {
   const v = el.value || {};
@@ -268,7 +269,8 @@ function renderTspl(template, values = {}, opts = {}) {
   // Drop the QC CHOP block first, so wrapping and barcode centring both see
   // the label as it will actually print.
   const variantEls = applyVariant(template.elements || [], opts.variant);
-  const { elements, values: vals } = collapseModelRow(variantEls, values);
+  const split = prepareSplitWorkOrder(variantEls, values, opts.splitPart);
+  const { elements, values: vals } = collapseModelRow(split.elements, split.values);
   const heightDots = Math.round((L.heightMm || 0) * (L.dpi || 203) / 25.4);
   // Most templates are designed sideways and turned upright to print top-down.
   // A tab can opt out (upright:false) to print exactly as MES designed it — e.g.

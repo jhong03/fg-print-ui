@@ -19,6 +19,14 @@
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+[hidden] { display: none !important; }
+.operator-header { display: flex; justify-content: flex-end; margin: -18px 0 20px; font-size: 14px; }
+.operator-header a { color: var(--accent); text-underline-offset: 3px; }
+.queue-printer-label { display: block; font-size: 13px; margin-top: 12px; color: var(--ink-soft); }
+.queue-printer-select { width: 100%; margin: 4px 0 12px; padding: 8px; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.q-review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.q-review-actions button { font-size: 12px; padding: 5px 8px; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -428,6 +436,41 @@ html, body {
 .b-jtc { font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
 .b-source { font-size: 12px; color: var(--ink-soft); font-family: var(--mono); overflow-wrap: anywhere; }
 .b-tasks { display: flex; flex-wrap: wrap; gap: 8px; }
+.b-item--split { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 12px; }
+.b-pairs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+}
+.b-pair {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.b-pair--current { border-color: var(--accent); }
+.b-pair--scanning { box-shadow: 0 0 0 2px #2f6b4f2e, 0 0 12px #2f6b4f3b; }
+.b-pair__heading { display: flex; width: 100%; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.b-pair__qty { margin-left: auto; font-size: 13px; color: var(--ink-soft); }
+.b-pair__status { font-size: 13px; color: var(--ink-soft); }
+.b-pair--current .b-pair__status {
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+.b-pair__preview { padding: 5px 8px; font-size: 13px; }
+.b-pair__preview[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .b-pill {
   display: inline-flex;
   flex-direction: column;

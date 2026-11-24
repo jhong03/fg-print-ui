@@ -20,8 +20,9 @@ function formatDate(v) {
   return s;
 }
 
-function mapRecordToFields(r) {
+function mapRecordToFields(r, templateId) {
   const jtcNo = (r.jtcNo || '').trim();
+  const isWorkOrderTemplate = String(templateId) === '1';
   // Barcode encodes ONLY the JTC barcode id. When a job has none, we leave this
   // empty and the barcode element is skipped entirely (rather than falling back
   // to the long JTC No, which produced inconsistent barcode widths).
@@ -30,13 +31,11 @@ function mapRecordToFields(r) {
     : '';
 
   return {
-    // JTC No lives on `woNumber` — its true catalog meaning ("Work order no.").
-    // Both P1's "JTC No" and P3's "W.O. NO." bind woNumber.
-    // ⚠ P3 (template 13) must be rebound coNumber -> woNumber for this, otherwise
-    //   its "W.O. NO." would show the C/O No instead of the JTC No.
     woNumber: r.woNumber || '',
-    // C/O number = CustomerOrder.OrderNumber — its true catalog meaning.
-    coNumber: jtcNo,
+    // Template 1 binds W.O. NO. to coNumber and has a dedicated JTC NO. field.
+    // Other templates still rely on the older coNumber binding for the JTC.
+    coNumber: isWorkOrderTemplate ? String(r.coNo ?? '').trim() : jtcNo,
+    ...(isWorkOrderTemplate ? { jtcNo } : {}),
     // The part NAME / description. P1's "Part Name" and P3's "PART NAME" both
     // bind this key.
     partDesc: r.partName || '',

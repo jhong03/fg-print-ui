@@ -129,4 +129,10 @@ async function close() {
   }
 }
 
-module.exports = { search, getOne, getCompletedSince, getLatestCompletionMark, close };
+async function getStockLocations() {
+  const pool = await getPool();
+  const result = await pool.request().query(sql.stockLocations);
+  return result.recordset;
+}
+
+module.exports = { search, getOne, getCompletedSince, getLatestCompletionMark, getStockLocations, close };

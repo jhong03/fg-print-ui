@@ -87,7 +87,7 @@ const RECORDS = [
     reqQty: 46,      // Quantity (required/planned) — what the WO label should show
     uom: 'PCS',
     woNumber: 'WO-2606-594E23',
-    coNo: '',
+    coNo: 'CO-2026-0047',
     barcodeId: '91001',
     stockCode: 'E23-0100',
     processCode: 'PL',
@@ -184,5 +184,9 @@ function __reset(key) {
 
 module.exports = {
   search, getOne, getCompletedSince, getLatestCompletionMark,
+  getStockLocations: async () => [
+    { id: 18, name: 'P3 Outgoing', code: 'P3-OUTGOING' },
+    { id: 19, name: 'P1 Outgoing', code: 'P1-OUTGOING' },
+  ],
   __complete, __reset, close: async () => {},
 };

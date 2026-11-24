@@ -1,5 +1,9 @@
 # JTC Operator UI
 
+Printer setup is available from **Printer settings** on the operator screen.
+See [the setup and integration guide](docs/printer-setup.md) for multiple printers,
+agent authentication, per-printer queues and restart requirements.
+
 A minimal local web app for production operators: pick a **JTC No** (type or scan),
 see the job's details, and print the label.
 

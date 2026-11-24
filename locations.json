@@ -7,7 +7,15 @@
     "variant": "qc",
     "barcodeNudge": 16,
     "models": [],
-    "doneOnly": true
+    "doneOnly": true,
+    "splitWoLabels": false,
+    "requireQrBinding": false,
+    "reworkQrBinding": false,
+    "weldingToPainting": false,
+    "splitPartOneQty": 25,
+    "upright": true,
+    "boldTitle": false,
+    "boldText": []
   },
   {
     "id": "fg-sticker-plain",
@@ -20,30 +28,98 @@
     "doneOnly": true
   },
   {
-    "id": "work-order-p3-k2vg",
-    "name": "Work Order (P3) - K2VG",
+    "id": "work-order-p3-k2sa",
+    "name": "Work Order (P3) - K2SA",
     "group": "P3",
-    "modeGroup": "work-order-p3-k2vg",
+    "modeGroup": "work-order-p3-k2sa",
     "mode": "normal",
-    "templateId": "13",
+    "templateId": "1",
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K2VG"],
+    "models": [
+      "K2SA"
+    ],
+    "weldingToPainting": true,
+    "processCodePrepend": "SB",
+    "requireQrBinding": true,
+    "reworkQrBinding": false,
+    "doneOnly": false,
+    "splitWoLabels": true,
+    "splitPartOneQty": 25,
+    "boldTitle": false,
+    "boldText": []
+  },
+  {
+    "id": "work-order-p3-k2sa-rework",
+    "name": "Work Order (P3) - K2SA Rework",
+    "group": "P3",
+    "modeGroup": "work-order-p3-k2sa",
+    "mode": "rework",
+    "templateId": "1",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": [
+      "K2SA"
+    ],
+    "reworkQrBinding": true,
+    "splitWoLabels": false,
+    "requireQrBinding": false,
+    "weldingToPainting": false,
+    "doneOnly": false,
+    "splitPartOneQty": 25,
+    "boldTitle": false,
+    "boldText": []
+  },
+  {
+    "id": "work-order-p3-k0wl",
+    "name": "Work Order (P3) - K0WL",
+    "group": "P3",
+    "modeGroup": "work-order-p3-k0wl",
+    "mode": "normal",
+    "templateId": "1",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": [
+      "K0WL"
+    ],
     "weldingToPainting": true,
     "processCodePrepend": "SB",
     "requireQrBinding": true
   },
   {
-    "id": "work-order-p3-k0wy",
-    "name": "Work Order (P3) - K0WY",
+    "id": "work-order-p3-k0wl-rework",
+    "name": "Work Order (P3) - K0WL Rework",
     "group": "P3",
-    "templateId": "16",
+    "modeGroup": "work-order-p3-k0wl",
+    "mode": "rework",
+    "templateId": "1",
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K0WY"],
-    "doneOnly": true
+    "models": [
+      "K0WL"
+    ],
+    "reworkQrBinding": true
+  },
+  {
+    "id": "work-order-p3-k2vg",
+    "name": "Work Order (P3) - K2VG",
+    "group": "P3",
+    "modeGroup": "work-order-p3-k2vg",
+    "mode": "normal",
+    "templateId": "1",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": [
+      "K2VG"
+    ],
+    "weldingToPainting": true,
+    "processCodePrepend": "SB",
+    "requireQrBinding": true
   },
   {
     "id": "work-order-p3-k2vg-rework",
@@ -51,12 +127,59 @@
     "group": "P3",
     "modeGroup": "work-order-p3-k2vg",
     "mode": "rework",
-    "templateId": "13",
+    "templateId": "1",
     "variant": "plain",
     "barcodeNudge": 0,
     "upright": false,
-    "models": ["K2VG"],
+    "models": [
+      "K2VG"
+    ],
     "reworkQrBinding": true
+  },
+  {
+    "id": "work-order-p3-k2pm",
+    "name": "Work Order (P3) - K2PM",
+    "group": "P3",
+    "modeGroup": "work-order-p3-k2pm",
+    "mode": "normal",
+    "templateId": "1",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": [
+      "K2PM"
+    ],
+    "weldingToPainting": true,
+    "processCodePrepend": "SB",
+    "requireQrBinding": true
+  },
+  {
+    "id": "work-order-p3-k2pm-rework",
+    "name": "Work Order (P3) - K2PM Rework",
+    "group": "P3",
+    "modeGroup": "work-order-p3-k2pm",
+    "mode": "rework",
+    "templateId": "1",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": [
+      "K2PM"
+    ],
+    "reworkQrBinding": true
+  },
+  {
+    "id": "work-order-p3-k0wy",
+    "name": "Work Order (P3) - K0WY",
+    "group": "P3",
+    "templateId": "1",
+    "variant": "plain",
+    "barcodeNudge": 0,
+    "upright": false,
+    "models": [
+      "K0WY"
+    ],
+    "doneOnly": true
   },
   {
     "id": "p3-fg-sticker",

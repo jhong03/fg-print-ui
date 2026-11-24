@@ -8,6 +8,7 @@
  *   jtc_barcodeId -- the printed painting JTC's Job.Id (the *j<id> barcode value)
  *   qr_start      -- the Green/Start tag scanned, as an int (e.g. 2101)
  *   qr_end        -- the Red/End tag scanned,   as an int (e.g. 2201)
+ *   pair_number   -- 1 or 2 for split WO labels, NULL for regular binding
  *
  * This is its OWN connection (separate pool from the read DB), configured with
  * QRPG_* env vars, falling back to the PG_* vars if those are unset. It is
@@ -42,7 +43,7 @@ function getPool() {
 }
 
 // Insert one binding row. Returns { ok, id? } / { ok:false, error }. Never throws.
-async function record({ jtcBarcodeId, qrStart, qrEnd }) {
+async function record({ jtcBarcodeId, qrStart, qrEnd, pairNumber }) {
   if (disabled) return { ok: false, error: 'qrLink disabled (missing config)' };
   if (!env('DATABASE') || !env('USER')) {
     disabled = true; // no PG config -> stop trying, log once
@@ -50,10 +51,11 @@ async function record({ jtcBarcodeId, qrStart, qrEnd }) {
     return { ok: false, error: 'no config' };
   }
   try {
-    const { rows } = await getPool().query(
-      'INSERT INTO public.qr_jtc_link ("jtc_barcodeId", qr_start, qr_end) VALUES ($1, $2, $3) RETURNING id',
-      [jtcBarcodeId, qrStart, qrEnd]
-    );
+    const values = [jtcBarcodeId, qrStart, qrEnd];
+    // Regular bindings still work on installations that have not migrated yet.
+    const { rows } = pairNumber == null
+      ? await getPool().query('INSERT INTO public.qr_jtc_link ("jtc_barcodeId", qr_start, qr_end) VALUES ($1, $2, $3) RETURNING id', values)
+      : await getPool().query('INSERT INTO public.qr_jtc_link ("jtc_barcodeId", qr_start, qr_end, pair_number) VALUES ($1, $2, $3, $4) RETURNING id', [...values, pairNumber]);
     return { ok: true, id: rows[0]?.id };
   } catch (err) {
     console.error('[qrLink] insert failed:', err.message);

@@ -4,10 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JTC Lookup</title>
-  <link rel="stylesheet" href="styles.css?v=19" />
+  <link rel="stylesheet" href="styles.css?v=21" />
 </head>
 <body>
   <main class="page">
+    <nav class="operator-header"><a href="settings.html">Printer settings</a></nav>
     <!-- Master tabs (groups, e.g. P1 / P3) + destination tabs. From /api/locations. -->
     <div class="tabs tabs--master" id="masterTabs" role="tablist" aria-label="Label group" hidden></div>
     <div class="tabs" id="tabs" role="tablist" aria-label="Print destination" hidden></div>
@@ -85,6 +86,8 @@
           <button id="clearSpoolerBtn" class="btn btn--sm btn--ghost" type="button">Clear printer spooler</button>
         </div>
       </div>
+      <label class="queue-printer-label" for="queuePrinter">Printer queue</label>
+      <select id="queuePrinter" class="queue-printer-select" aria-label="Printer queue"></select>
       <span id="autoState" class="queue__auto" hidden></span>
       <p id="queueBanner" class="queue__banner" hidden></p>
       <ul id="queueList" class="queue__list"></ul>
@@ -93,7 +96,7 @@
   </main>
 
   <script src="/vendor/JsBarcode.all.min.js"></script>
-  <script src="labelPreview.js?v=20"></script>
-  <script src="app.js?v=23"></script>
+  <script src="labelPreview.js?v=21"></script>
+  <script src="app.js?v=32"></script>
 </body>
 </html>

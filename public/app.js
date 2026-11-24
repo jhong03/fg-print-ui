@@ -25,7 +25,7 @@ let currentList = [];   // current suggestion data
 let debounceTimer = null;
 
 // ---- Setup ----------------------------------------------------------------
-input.focus();
+input.disabled = true;
 initLocations();
 
 // ---- Destination tabs -----------------------------------------------------
@@ -39,6 +39,7 @@ let currentLocation = null;   // { id, name, group, templateId, variant } or nul
 let locationName = {};        // id -> friendly name, for labelling queued jobs
 let allLocations = [];        // every destination from /api/locations
 let currentGroup = null;      // the selected master tab (group)
+let locationEpoch = 0;       // invalidates UI replies from a previously selected mode/tab
 
 function bindingModeFor(loc = currentLocation) {
   if (loc?.reworkQrBinding || loc?.bindingMode === 'rework') return 'rework';
@@ -48,6 +49,23 @@ function bindingModeFor(loc = currentLocation) {
 
 function hasBindingGate(loc = currentLocation) {
   return !!bindingModeFor(loc);
+}
+
+function bindingInstructions(loc = currentLocation) {
+  const mode = bindingModeFor(loc);
+  if (mode === 'rework') return 'Scan the Black Rework QR (03xx) to release this label.';
+  if (loc?.splitPartOneQty != null) return 'Scan one Green Start and Red End pair for each WO label.';
+  if (mode === 'normal') return 'Scan the Green (Start) and Red (End) QR tags to release this label.';
+  return '';
+}
+
+function bindingStatus(loc = currentLocation, staged = false) {
+  const text = bindingInstructions(loc);
+  return staged && text ? 'Staged — ' + text[0].toLowerCase() + text.slice(1) : text;
+}
+
+function sameLocation(loc, epoch) {
+  return currentLocation?.id === loc?.id && locationEpoch === epoch;
 }
 
 // Group helpers. A location with no `group` falls into "Other".
@@ -74,19 +92,33 @@ async function initLocations() {
     if (!res.ok) throw new Error('locations ' + res.status);
     list = await res.json();
   } catch (_) {
-    return; // no tabs — the server still prints to its default destination
+    setStatus('Could not load label groups. Refresh the page to try again.', true);
+    return;
   }
   if (!Array.isArray(list) || !list.length) return;
 
-  allLocations = list;
+  allLocations = list.filter((loc) => loc.visible !== false);
   // id -> name, so the queue can label each job with its destination.
   locationName = Object.fromEntries(list.map((l) => [l.id, l.name]));
+  if (!allLocations.length) {
+    currentLocation = null;
+    currentGroup = null;
+    masterTabs.hidden = tabs.hidden = modeToggle.hidden = true;
+    emptyState.querySelector('p').textContent = 'No labels are visible. Open Printer settings to show a group and its labels.';
+    setStatus('All labels are hidden on this screen.');
+    return;
+  }
 
   const savedId = localStorage.getItem(LOC_KEY);
-  currentLocation = list.find((l) => l.id === savedId) || list[0];
+  currentLocation = allLocations.find((l) => l.id === savedId) || allLocations[0];
+  localStorage.setItem(LOC_KEY, currentLocation.id);
   currentGroup = groupOf(currentLocation);
   renderMasterTabs();
   renderSubTabs();
+  input.disabled = false;
+  input.focus();
+  setStatus(bindingStatus());
+  refreshBinding();
 }
 
 // Master tabs = the distinct groups (e.g. P1 / P3). Hidden when there's only one
@@ -190,6 +222,7 @@ function selectGroup(g) {
 function selectLocation(loc) {
   if (currentLocation && loc.id === currentLocation.id) { markActiveTab(); return; }
   currentLocation = loc;
+  locationEpoch++;
   localStorage.setItem(LOC_KEY, loc.id);
   // Keep the master tab + sub bar in sync if this selection changed the group.
   if (groupOf(loc) !== currentGroup) {
@@ -199,6 +232,10 @@ function selectLocation(loc) {
   }
   markActiveTab();
   renderModeToggle();
+  setStatus(bindingStatus(loc));
+  hideBindingError();
+  selectedBinding = null;
+  bindingPreview = null;
   // The template + variant just changed, so anything on screen is now stale.
   if (currentJtc) {
     renderLabelPreview(currentJtc, labelMount, currentLocation);
@@ -208,6 +245,8 @@ function selectLocation(loc) {
   selectedBindingId = null;
   bindingCleared = false;
   lastMaxBindingId = 0;
+  bindingAutoReleaseBlockedId = null;
+  renderBinding([]); // Remove the previous mode's rows and instructions while loading this one.
   refreshBinding();        // pick up the new tab's staged work (if any)
   input.focus();
 }
@@ -276,6 +315,8 @@ input.addEventListener('input', (e) => {
  * to the suggestion list rather than showing a "not found" dead end.
  */
 async function acceptScan(q) {
+  if (!currentLocation) return;
+  const loc = currentLocation, epoch = locationEpoch;
   // A scanned QR TAG (bare 4-digit WDSS) is a binding scan, not a JTC lookup —
   // route it to the QR gate, clear the box, and blur so the dropdown doesn't cover
   // the preview (the next scan is caught by global capture, which needs no focus).
@@ -287,9 +328,10 @@ async function acceptScan(q) {
   try {
     record = await loadJtc(q);
   } catch (err) {
-    setStatus(err.message, true);
+    if (sameLocation(loc, epoch)) setStatus(err.message, true);
     return;
   }
+  if (!sameLocation(loc, epoch)) return;
   if (input.value.trim() !== q) return;   // operator typed/scanned again
   if (!record) { setStatus(''); runSearch(q); return; }
   // Show the resolved JTC No — a scanned barcode id isn't the order number.
@@ -364,6 +406,7 @@ document.addEventListener('keydown', (e) => {
 // A globally-captured scan: a QR tag drives the current tab's binding; a JTC fills the
 // field + loads/queues it — exactly like scanning into the field.
 function routeGlobalScan(v) {
+  if (!currentLocation) return;
   const val = v.trim();
   if (!val) return;
   if (isQrToken(val)) { bindingScan(val); return; }
@@ -476,11 +519,14 @@ async function loadJtc(jtcNo) {
 }
 
 async function selectJtc(jtcNo) {
+  if (!currentLocation) return;
+  const loc = currentLocation, epoch = locationEpoch;
   hideSuggestions();
   input.value = jtcNo;
   setStatus('Loading ' + jtcNo + '…');
   try {
     const record = await loadJtc(jtcNo);
+    if (!sameLocation(loc, epoch)) return;
     if (!record) {
       showEmpty();
       setStatus('No job found for ' + jtcNo, true);
@@ -500,6 +546,7 @@ async function selectJtc(jtcNo) {
     // keeping the field selected.
     settleAfterScan();
   } catch (e) {
+    if (!sameLocation(loc, epoch)) return;
     showEmpty();
     setStatus(e.message, true);
   }
@@ -571,13 +618,16 @@ printBtn.addEventListener('click', () => {
  * that survives printer stalls and power cuts. `fromScan` only tweaks the wording.
  */
 async function enqueuePrint(jtcNo, { fromScan } = {}) {
+  if (!currentLocation) return;
+  const loc = currentLocation, epoch = locationEpoch;
   try {
     const res = await fetch('/api/print', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jtcNo, location: currentLocation?.id }),
+      body: JSON.stringify({ jtcNo, location: loc.id }),
     });
     const body = await res.json().catch(() => ({}));
+    if (!sameLocation(loc, epoch)) { refreshQueue(); return; }
     if (!res.ok || !body.success) throw new Error(body.error || 'Could not queue');
     // QR-gated tab: the server STAGED the job instead of queuing it. Surface the
     // task-list; nothing prints until Green + Red are scanned.
@@ -585,9 +635,7 @@ async function enqueuePrint(jtcNo, { fromScan } = {}) {
       // Select the just-staged job so its (single) preview shows and scans target it.
       if (body.id != null) selectedBindingId = body.id;
       bindingCleared = false;
-      setStatus(body.bindingMode === 'rework'
-        ? 'Staged — scan the Black Rework QR (03xx) to release the label.'
-        : 'Staged — scan the Green (Start) and Red (End) QR tags to release the label.');
+      setStatus(bindingStatus(loc, true));
       await refreshBinding();
       return;
     }
@@ -600,13 +648,13 @@ async function enqueuePrint(jtcNo, { fromScan } = {}) {
       : verb + ' ' + queued + from + ' for printing.');
     refreshQueue();
   } catch (e) {
-    setStatus(e.message, true);
+    if (sameLocation(loc, epoch)) setStatus(e.message, true);
   }
 }
 
 // Fetch the rendered TSPL for the current JTC + destination into the panel.
 async function refreshTspl() {
-  const res = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc) + locQuery());
+  const res = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc) + locQuery() + splitPreviewQuery());
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Preview failed');
   tsplView.textContent = text;
@@ -661,7 +709,7 @@ reloadTplBtn.addEventListener('click', async () => {
     setStatus('Template reloaded' + (body.name ? ': ' + body.name : '') + when + '.');
     // Reflect the new design: redraw the label, and the TSPL panel if it's open.
     if (currentJtc) {
-      renderLabelPreview(currentJtc, labelMount, currentLocation);
+      renderLabelPreview(currentJtc, labelMount, currentLocation, splitPreviewQuery());
       if (!tsplPanel.hidden) await refreshTspl();
     }
   } catch (e) {
@@ -678,6 +726,8 @@ clearBtn.addEventListener('click', () => {
   // Remove staged jobs individually with the ✕ on each row.
   if (hasBindingGate()) {
     selectedBindingId = null;
+    selectedBinding = null;
+    bindingPreview = null;
     bindingCleared = true;
     refreshBinding();   // re-render the rows unselected
   }
@@ -722,6 +772,8 @@ let autoStatus = null;
 // "Printed"; anything not out yet reads as clearly not-done.
 const STATUS_LABEL = {
   queued: 'Waiting',
+  submitting: 'Sending…',
+  review: 'Check print outcome',
   printing: 'Sending…',
   done: 'Sent to printer',
   error: 'Not printed',
@@ -737,88 +789,103 @@ async function refreshQueue() {
   renderQueue(q);
 }
 
+let selectedQueueKey = null;
+const queuePrinter = document.getElementById('queuePrinter');
+let latestQueue = null;
+const isPendingPrint = (j) => ['queued', 'submitting', 'printing', 'review'].includes(j.status);
+queuePrinter.addEventListener('change', () => {
+  selectedQueueKey = queuePrinter.value || null;
+  if (latestQueue) renderQueue(latestQueue);
+});
+
 function renderQueue(q) {
-  const pending = q.jobs.filter((j) => j.status === 'queued' || j.status === 'printing');
-  // Hide the panel entirely when there's nothing to show and all is well — but
-  // keep it up while this station is auto-watching, so the operator can see it's
-  // armed even with an empty queue.
-  const autoWatching = !!(autoStatus?.enabled && autoStatus?.started);
-  queuePanel.hidden = q.jobs.length === 0 && !q.paused && !autoWatching;
-
-  const next = pending[0];
-  if (q.paused && pending.length) {
-    queueState.textContent = 'Paused · ' + pending.length + ' waiting';
-    queueState.className = 'queue__state queue__state--paused';
-    queueBanner.hidden = false;
-    queueBanner.textContent =
-      'Printer paused. Check labels/ribbon and feed if needed, then Resume'
-      + (next ? ' — next: ' + next.jtcNo : '') + '.';
-  } else if (pending.length) {
-    queueState.textContent = 'Printing · ' + pending.length + ' in queue';
-    queueState.className = 'queue__state queue__state--busy';
-    queueBanner.hidden = true;
-  } else {
-    queueState.textContent = 'Idle';
-    queueState.className = 'queue__state';
-    queueBanner.hidden = true;
+  latestQueue = q;
+  if (!Array.isArray(q.queues)) {
+    queuePanel.hidden = false; queueBanner.hidden = false;
+    queueBanner.textContent = 'Restart fg-print-ui to load the updated printer queues.';
+    resumeBtn.hidden = pauseBtn.hidden = clearQueueBtn.hidden = clearAllBtn.hidden = true;
+    clearSpoolerBtn.disabled = true;
+    return;
   }
-
-  // Only offer Resume when there's actually a held backlog. A paused-but-empty
-  // queue has nothing to resume (and a stale in-flight poll can't re-show it).
-  resumeBtn.hidden = !(q.paused && pending.length);
-  pauseBtn.hidden = q.paused || !pending.length;
-  clearQueueBtn.hidden = !q.jobs.some((j) => j.status === 'done' || j.status === 'error');
-  // "Clear queue" (discard the whole backlog) only when there's pending work.
+  const queues = q.queues || [];
+  if (!queues.some((lane) => lane.key === selectedQueueKey)) {
+    selectedQueueKey = queues.find((lane) => q.jobs.some((j) => j.queueKey === lane.key && j.printerId === currentLocation?.printerId))?.key
+      || queues.find((lane) => lane.pending)?.key || queues[0]?.key || null;
+  }
+  queuePrinter.replaceChildren();
+  for (const lane of queues) {
+    const option = document.createElement('option');
+    option.value = lane.key;
+    option.textContent = lane.name + ' · ' + lane.pending + ' waiting' + (lane.paused ? ' · paused' : '');
+    queuePrinter.appendChild(option);
+  }
+  queuePrinter.value = selectedQueueKey || '';
+  const lane = queues.find((x) => x.key === selectedQueueKey);
+  const jobs = q.jobs.filter((j) => j.queueKey === selectedQueueKey);
+  const pending = jobs.filter(isPendingPrint);
+  const autoWatching = !!(autoStatus?.enabled && autoStatus?.started);
+  queuePanel.hidden = !q.jobs.length && !q.fault && !autoWatching;
+  const held = !!lane?.paused;
+  queueState.textContent = q.fault ? 'Storage error' : held && pending.length ? 'Paused · ' + pending.length + ' waiting'
+    : pending.length ? 'Processing · ' + pending.length + ' waiting' : 'Idle';
+  queueState.className = 'queue__state' + (held || q.fault ? ' queue__state--paused' : pending.length ? ' queue__state--busy' : '');
+  queueBanner.hidden = !q.fault && !(held && pending.length);
+  queueBanner.textContent = q.fault || pending[0]?.error || 'This printer is paused. Check it, then Resume.';
+  resumeBtn.hidden = !(held && pending.length);
+  resumeBtn.disabled = pending.some((j) => j.status === 'review') || !!q.fault;
+  pauseBtn.hidden = held || !pending.length;
+  clearQueueBtn.hidden = !jobs.some((j) => !isPendingPrint(j));
   clearAllBtn.hidden = !pending.length;
-
-  queueList.innerHTML = '';
-  // Pending shown in PRINT ORDER with a queue number (#1 = next out); finished
-  // jobs follow as history (most recent first), unnumbered.
-  const finished = q.jobs.filter((j) => j.status === 'done' || j.status === 'error').reverse();
+  clearSpoolerBtn.disabled = !selectedQueueKey || !!q.fault;
+  queueList.replaceChildren();
+  const finished = jobs.filter((j) => !isPendingPrint(j)).reverse();
   const rows = pending.map((j, i) => ({ j, num: i + 1 })).concat(finished.map((j) => ({ j, num: null })));
-
-  rows.forEach(({ j, num }) => {
+  for (const { j, num } of rows) {
     const li = document.createElement('li');
-    // Flag by problem, not status: a held/queued job carrying an error reads red
-    // too, so operators see "not printed" at a glance.
     li.className = 'q-item q-' + j.status + (j.error ? ' q-problem' : '');
-
-    const n = document.createElement('span');
-    n.className = 'q-num';
-    n.textContent = num ? '#' + num : '';
-
-    // JTC + optional provenance ("from <welding JTC>") stacked in one column.
-    const jtcWrap = document.createElement('div');
-    jtcWrap.className = 'q-jtcwrap';
-    const jtc = document.createElement('span');
-    jtc.className = 'q-jtc';
-    jtc.textContent = j.jtcNo;
-    jtcWrap.appendChild(jtc);
-    if (j.sourceJtc) {
-      const src = document.createElement('span');
-      src.className = 'q-source';
-      src.textContent = '↳ from ' + j.sourceJtc;
-      jtcWrap.appendChild(src);
+    const n = document.createElement('span'); n.className = 'q-num'; n.textContent = num ? '#' + num : '';
+    const details = document.createElement('div'); details.className = 'q-jtcwrap';
+    const title = document.createElement('span'); title.className = 'q-jtc'; title.textContent = j.jtcNo; details.appendChild(title);
+    if (j.sourceJtc) { const from = document.createElement('span'); from.className = 'q-source'; from.textContent = '↳ from ' + j.sourceJtc; details.appendChild(from); }
+    if (j.splitPart) {
+      const part = document.createElement('span'); part.className = 'q-source';
+      part.textContent = splitPartTitle(j.splitPart); details.appendChild(part);
     }
-
-    const type = document.createElement('span');
-    type.className = 'q-type';
-    type.textContent = locationName[j.location] || j.location || '';
-
-    const st = document.createElement('span');
-    st.className = 'q-status';
-    st.textContent = j.error ? (STATUS_LABEL[j.status] + ': ' + j.error) : STATUS_LABEL[j.status];
-
-    li.append(n, jtcWrap, type, st);
-    queueList.appendChild(li);
-  });
+    if (j.status === 'review' || (j.splitPart && j.status === 'error')) {
+      const controls = document.createElement('div'); controls.className = 'q-review-actions';
+      const decisions = j.status === 'review' ? [['sent', 'Mark as sent'], ['retry', 'Retry after checking']] : [['retry', 'Retry label']];
+      for (const [decision, text] of decisions) {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn--ghost'; button.textContent = text;
+        button.addEventListener('click', async () => {
+          const question = decision === 'sent' ? 'Confirm this label already came out? The job will be marked sent.'
+            : 'Have you checked that this label did not print and cleared any remaining spool job? Retrying may produce a duplicate if it already printed.';
+          if (j.status === 'review' && !confirm(question)) return;
+          if (await queueAction('resolve', { id: j.id, decision })) {
+            setStatus(decision === 'retry' ? 'Retry prepared. Press Resume when the printer is ready.' : 'Job marked as sent. Resume this printer to continue.');
+          }
+        });
+        controls.appendChild(button);
+      }
+      details.appendChild(controls);
+    }
+    const type = document.createElement('span'); type.className = 'q-type'; type.textContent = locationName[j.location] || j.location || '';
+    const status = document.createElement('span'); status.className = 'q-status';
+    status.textContent = (STATUS_LABEL[j.status] || j.status) + (j.error ? ': ' + j.error : '');
+    li.append(n, details, type, status); queueList.appendChild(li);
+  }
 }
 
-async function queueAction(path) {
+async function queueAction(path, body = {}) {
   try {
-    renderQueue(await (await fetch('/api/queue/' + path, { method: 'POST' })).json());
+    const response = await fetch('/api/queue/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ queueKey: selectedQueueKey, ...body }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Queue action failed');
+    renderQueue(result);
+    return true;
   } catch (e) {
     setStatus('Queue action failed: ' + e.message, true);
+    return false;
   }
 }
 
@@ -827,7 +894,7 @@ pauseBtn.addEventListener('click', () => queueAction('pause'));
 clearQueueBtn.addEventListener('click', () => queueAction('clear'));
 // Destructive: drops jobs still waiting to print, so confirm first.
 clearAllBtn.addEventListener('click', () => {
-  if (confirm('Clear the entire print queue, including jobs still waiting to print? This cannot be undone.')) {
+  if (confirm('Clear waiting and finished jobs for this printer? In-flight jobs must be resolved first.')) {
     queueAction('clear-all');
   }
 });
@@ -840,14 +907,17 @@ const SPOOLER_REASON = {
   'no-printer': 'No printer found for this tab.',
 };
 clearSpoolerBtn.addEventListener('click', async () => {
+  if (!confirm('Clear the Windows spooler for the selected printer? Check affected labels before retrying any print.')) return;
   clearSpoolerBtn.disabled = true;
   setStatus('Clearing printer spooler…');
   try {
-    const r = await (await fetch('/api/queue/clear-spooler', {
+    const response = await fetch('/api/queue/clear-spooler', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ location: currentLocation?.id }),
-    })).json();
+      headers: { 'Content-Type': 'application/json', 'X-Print-UI-Settings': '1' },
+      body: JSON.stringify({ location: currentLocation?.id, queueKey: selectedQueueKey }),
+    });
+    const r = await response.json();
+    if (!response.ok) throw new Error(r.error || 'Could not clear the spooler');
     if (r.queue) renderQueue(r.queue);
     if (r.ok) setStatus(r.empty ? 'Printer spooler cleared.' : 'Spooler clear sent — still draining.');
     else setStatus(SPOOLER_REASON[r.reason] || 'Could not clear the spooler.', true);
@@ -923,15 +993,83 @@ let bindingAutoReleaseBlockedId = null; // stop repeated retries after a termina
 let selectedBindingId = null; // which staged item the preview + scan + print target
 let bindingCleared = false;   // Clear deselects (blank preview) without touching the queue
 let lastMaxBindingId = 0;     // detect newly-staged jobs (ids ascend) to re-surface them
+let selectedBinding = null;
+let bindingPreview = null;
+let bindingReadVersion = 0;
 
-function bindLocQuery() {
-  return currentLocation ? '?location=' + encodeURIComponent(currentLocation.id) : '';
+function splitPartTitle(part) { return 'Pair ' + part.number + ' of 2 · Qty ' + part.qty; }
+function splitPreviewQuery() {
+  return bindingPreview ? '&bindingId=' + bindingPreview.id + '&part=' + bindingPreview.part : '';
+}
+function activeSplitPart(job) { return job?.parts?.find((part) => part.number === job.currentPart); }
+
+function renderSplitPairs(job, selected, previewJtc, jobs) {
+  const cards = document.createElement('ol');
+  cards.className = 'b-pairs';
+  cards.setAttribute('aria-label', 'QR pairs');
+
+  for (const part of job.parts) {
+    const current = selected && part.number === job.currentPart;
+    const ready = !!(part.startTag && part.endTag);
+    const card = document.createElement('li');
+    card.className = 'b-pair';
+    if (current) {
+      card.classList.add('b-pair--current');
+      card.setAttribute('aria-current', 'step');
+    }
+    if (current && !ready) card.classList.add('b-pair--scanning');
+
+    const heading = document.createElement('div');
+    heading.className = 'b-pair__heading';
+    const title = document.createElement('strong');
+    title.textContent = 'Pair ' + part.number + ' of 2';
+    const quantity = document.createElement('span');
+    quantity.className = 'b-pair__qty';
+    quantity.textContent = 'Qty ' + part.qty;
+    heading.append(title, quantity);
+
+    const status = document.createElement('span');
+    status.className = 'b-pair__status';
+    if (ready) status.textContent = 'Bind complete';
+    else if (current) status.textContent = 'Scan now';
+    else status.textContent = part.number === job.currentPart ? 'Waiting for scans' : 'Waiting for Pair 1';
+    card.append(heading, status);
+
+    if (current || ready) {
+      const tasks = document.createElement('div');
+      tasks.className = 'b-tasks';
+      tasks.append(
+        taskPill('green', 'Green · Start', !!part.startTag, part.startTag ? String(part.startTag).padStart(4, '0') : ''),
+        taskPill('red', 'Red · End', !!part.endTag, part.endTag ? String(part.endTag).padStart(4, '0') : '')
+      );
+      card.appendChild(tasks);
+    }
+    if (selected && job.printed) {
+      const preview = document.createElement('button');
+      preview.type = 'button';
+      preview.className = 'btn btn--ghost b-pair__preview';
+      preview.textContent = 'Preview Pair ' + part.number;
+      preview.setAttribute('aria-pressed', String(bindingPreview.part === part.number));
+      preview.addEventListener('click', (event) => {
+        event.stopPropagation();
+        bindingPreview.part = part.number;
+        renderLabelPreview(previewJtc, labelMount, currentLocation, splitPreviewQuery());
+        if (!tsplPanel.hidden) void refreshTspl();
+        renderBinding(jobs);
+      });
+      card.appendChild(preview);
+    }
+    cards.appendChild(card);
+  }
+  return cards;
 }
 
 async function refreshBinding() {
   if (!hasBindingGate()) { renderBinding([]); return; }
+  const loc = currentLocation, epoch = locationEpoch, version = ++bindingReadVersion;
   try {
-    const r = await (await fetch('/api/binding' + bindLocQuery())).json();
+    const r = await (await fetch('/api/binding?location=' + encodeURIComponent(loc.id))).json();
+    if (!sameLocation(loc, epoch) || version !== bindingReadVersion) return;
     renderBinding(r.jobs || []);
   } catch (_) { /* transient; the poll retries */ }
 }
@@ -947,9 +1085,7 @@ function renderBinding(jobs) {
     return;
   }
   bindingTitle.textContent = rework ? 'Rework QR binding required' : 'QR binding required';
-  bindingNote.textContent = rework
-    ? 'Scan the Black Rework QR (03xx) to release this label.'
-    : 'Scan the workcell Green (Start) and Red (End) QR tags to release the label.';
+  bindingNote.textContent = bindingInstructions();
   bindingPanel.hidden = jobs.length === 0;
 
   // A newly-staged job (ids ascend) re-surfaces the preview even after a Clear.
@@ -966,25 +1102,45 @@ function renderBinding(jobs) {
   // selected → blank preview, but the queue rows stay). Keep the selection valid
   // if the previously-selected item was printed away / removed.
   let sel = jobs.find((j) => j.id === selectedBindingId);
-  if (!sel && !bindingCleared) { sel = jobs[0] || null; selectedBindingId = sel ? sel.id : null; }
+  if (!sel && !bindingCleared) { sel = jobs.find((j) => j.currentPart === 2) || jobs[0] || null; selectedBindingId = sel ? sel.id : null; }
   if (!sel) selectedBindingId = null;
+  selectedBinding = sel || null;
+  const activePart = activeSplitPart(sel);
+  const oldPreview = splitPreviewQuery();
+  if (sel?.parts) {
+    const stage = sel.currentPart ?? 0;
+    if (bindingPreview?.id !== sel.id || bindingPreview.stage !== stage) {
+      bindingPreview = { id: sel.id, stage, part: sel.currentPart || 2 };
+    }
+  } else bindingPreview = null;
+  const releaseKey = sel && (activePart ? sel.id + ':' + activePart.number : sel.id);
 
   // ONE preview, driven ONLY by the selected item (never by a separate manual
   // render — that was the double-preview bug). Render from the welding JTC
   // (sourceJtc) so the server applies welding->painting + SB prepend and returns
   // provenance. Guard on currentJtc so we don't redraw what's already shown.
   const previewJtc = sel ? (sel.sourceJtc || sel.paintingJtc) : null;
-  if (previewJtc && previewJtc !== currentJtc) {
+  if (previewJtc && (previewJtc !== currentJtc || oldPreview !== splitPreviewQuery())) {
     currentJtc = previewJtc;
     emptyState.hidden = true;
     label.hidden = false;
     actions.hidden = false;
-    renderLabelPreview(previewJtc, labelMount, currentLocation)
+    renderLabelPreview(previewJtc, labelMount, currentLocation, splitPreviewQuery())
       .then((model) => { if (model) showProvenance(model); });
+    if (!tsplPanel.hidden) void refreshTspl();
   }
 
   // Gate the Print button + header to the SELECTED item.
-  if (sel) {
+  if (sel?.parts) {
+    const ready = !!(activePart?.startTag && activePart.endTag);
+    printBtn.disabled = !ready || bindingReleasing;
+    printBtn.textContent = activePart ? (ready ? 'Queue Pair ' + activePart.number : 'Scan QR to print') : 'Both pairs queued';
+    const allBound = sel.parts.every((part) => part.startTag && part.endTag);
+    bindingState.textContent = allBound ? 'Bind complete' : splitPartTitle(activePart);
+    bindingNote.textContent = activePart
+      ? (activePart.number === 2 ? 'Pair 1 queued. Scan Green Start and Red End for Pair 2. You can reuse the same QR codes.' : 'Scan Green Start and Red End for Pair 1.')
+      : 'Both pairs are bound. Check the print queue for delivery status or to retry a label.';
+  } else if (sel) {
     const complete = rework ? sel.boundRework : (sel.boundStart && sel.boundEnd);
     printBtn.disabled = !complete;
     printBtn.textContent = complete ? (sel.printed ? 'Reprint label' : 'Print label') : 'Scan QR to print';
@@ -1006,7 +1162,7 @@ function renderBinding(jobs) {
   jobs.forEach((j) => {
     const isSel = j.id === selectedBindingId;
     const li = document.createElement('li');
-    li.className = 'b-item' + (isSel ? ' b-item--active' : '');
+    li.className = 'b-item' + (isSel ? ' b-item--active' : '') + (j.parts ? ' b-item--split' : '');
     li.addEventListener('click', () => {
       selectedBindingId = j.id;
       bindingCleared = false;
@@ -1017,7 +1173,7 @@ function renderBinding(jobs) {
     head.className = 'b-head';
     const jtc = document.createElement('span');
     jtc.className = 'b-jtc';
-    jtc.textContent = j.paintingJtc + (j.printed ? '  · sent' : (isSel ? '' : '  · waiting'));
+    jtc.textContent = j.paintingJtc + (j.parts ? (j.printed ? ' · both pairs queued' : '') : j.printed ? '  · sent' : (isSel ? '' : '  · waiting'));
     head.appendChild(jtc);
     if (j.sourceJtc) {
       const src = document.createElement('span');
@@ -1031,11 +1187,15 @@ function renderBinding(jobs) {
     rm.className = 'b-remove';
     rm.title = 'Remove from binding queue';
     rm.textContent = '✕';
+    rm.disabled = !!j.parts && !j.printed && j.parts.some((part) => part.printJobId != null);
+    if (rm.disabled) rm.title = 'Finish both QR pairs before removing this job';
     rm.addEventListener('click', (e) => { e.stopPropagation(); removeBinding(j.id); });
 
     li.append(head, rm);
 
-    if (isSel) {
+    if (j.parts) {
+      li.appendChild(renderSplitPairs(j, isSel, previewJtc, jobs));
+    } else if (isSel) {
       const tasks = document.createElement('div');
       tasks.className = 'b-tasks';
       // Only the 2nd digit gates direction, so there's no fixed "expected" tag.
@@ -1044,8 +1204,8 @@ function renderBinding(jobs) {
         tasks.append(taskPill('black', 'Black · Rework', j.boundRework, j.reworkQrId || ''));
       } else {
         tasks.append(
-          taskPill('green', 'Green · Start', j.boundStart, j.startTag ? String(j.startTag) : ''),
-          taskPill('red', 'Red · End', j.boundEnd, j.endTag ? String(j.endTag) : '')
+          taskPill('green', 'Green · Start', j.boundStart, String(j.startTag || '')),
+          taskPill('red', 'Red · End', j.boundEnd, String(j.endTag || ''))
         );
       }
       li.insertBefore(tasks, rm);
@@ -1055,10 +1215,8 @@ function renderBinding(jobs) {
 
   // Auto-release once the SELECTED item's tags are both in (hands-free path); the
   // Print button is the manual equivalent. The server's `printed` flag stops repeats.
-  if (sel && (rework ? sel.boundRework : (sel.boundStart && sel.boundEnd)) && !sel.printed && !bindingReleasing && bindingAutoReleaseBlockedId !== sel.id) {
-    bindingReleasing = true;
-    bindingReleasePrint().finally(() => { bindingReleasing = false; });
-  }
+  const ready = activePart ? activePart.startTag && activePart.endTag : rework ? sel?.boundRework : sel?.boundStart && sel?.boundEnd;
+  if (ready && !sel.printed && !bindingReleasing && bindingAutoReleaseBlockedId !== releaseKey) void bindingReleasePrint();
 }
 
 function taskPill(colour, text, done, hint) {
@@ -1077,55 +1235,74 @@ function taskPill(colour, text, done, hint) {
 }
 
 async function bindingScan(token) {
+  const loc = currentLocation, epoch = locationEpoch;
+  const partNumber = selectedBinding?.currentPart;
+  if (loc?.splitPartOneQty != null && selectedBindingId == null) { showBindingError('Select the split job before scanning its QR tags.'); return; }
   try {
     const res = await fetch('/api/binding/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ location: currentLocation?.id, token, id: selectedBindingId }),
+      body: JSON.stringify({ location: loc?.id, token, id: selectedBindingId, partNumber }),
     });
     const body = await res.json().catch(() => ({}));
+    if (!sameLocation(loc, epoch)) return;
     if (body.ok) { hideBindingError(); }
     else { showBindingError(body.error || 'QR tag rejected.'); }
     await refreshBinding();
   } catch (e) {
-    showBindingError(e.message);
+    if (sameLocation(loc, epoch)) showBindingError(e.message);
   }
-  input.focus();
+  if (sameLocation(loc, epoch)) input.focus();
 }
 
 async function bindingReleasePrint() {
+  if (bindingReleasing) return;
+  bindingReleasing = true;
+  const loc = currentLocation, epoch = locationEpoch, bindingId = selectedBindingId;
+  const partNumber = selectedBinding?.currentPart;
+  const releaseKey = partNumber ? bindingId + ':' + partNumber : bindingId;
   try {
     const res = await fetch('/api/binding/print', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ location: currentLocation?.id, id: selectedBindingId }),
+      body: JSON.stringify({ location: loc?.id, id: bindingId, partNumber }),
     });
     const body = await res.json().catch(() => ({}));
+    if (!sameLocation(loc, epoch)) { refreshQueue(); return; }
     if (!body.ok) {
-      if (body.alreadyBound) bindingAutoReleaseBlockedId = selectedBindingId;
+      if (partNumber || body.alreadyBound) bindingAutoReleaseBlockedId = releaseKey;
       showBindingError(body.error || 'Could not release the label.');
       return;
     }
     bindingAutoReleaseBlockedId = null;
     hideBindingError();
-    setStatus('QR bound — Work Order label sent to the print queue.');
+    setStatus(body.partNumber ? 'Pair ' + body.partNumber + ' of 2 sent to the print queue.' : 'QR bound — Work Order label sent to the print queue.');
+    bindingReadVersion++;
     renderBinding(body.jobs || []);
     refreshQueue();
   } catch (e) {
-    showBindingError(e.message);
-  }
+    if (sameLocation(loc, epoch)) {
+      if (partNumber) bindingAutoReleaseBlockedId = releaseKey;
+      showBindingError(e.message);
+    }
+  } finally { bindingReleasing = false; }
 }
 
 async function removeBinding(id) {
+  const loc = currentLocation, epoch = locationEpoch;
   try {
-    const r = await (await fetch('/api/binding/remove', {
+    const response = await fetch('/api/binding/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, location: currentLocation?.id }),
-    })).json();
+      body: JSON.stringify({ id, location: loc?.id }),
+    });
+    const r = await response.json();
+    if (!sameLocation(loc, epoch)) return;
+    if (!response.ok) throw new Error(r.error || 'Could not remove binding.');
+    bindingReadVersion++;
     renderBinding(r.jobs || []);
   } catch (e) {
-    showBindingError(e.message);
+    if (sameLocation(loc, epoch)) showBindingError(e.message);
   }
 }
 
