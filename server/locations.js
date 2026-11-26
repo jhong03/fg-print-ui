@@ -8,8 +8,8 @@
  *
  *   { id, name, templateId, printerType, agentUrl, variant, barcodeNudge }
  *
- * Only `id` and `name` are required. Everything else falls back to the global
- * defaults in .env, so a minimal entry is just an id, a name, and a templateId.
+ * Only `id` and `name` are required. Work Orders default to template 1.
+ * Other missing settings fall back to the global defaults in .env.
  *
  * The file is read LIVE (re-read when it changes on disk), so editing it takes
  * effect on the next print with no restart — same principle as the .env reads.
@@ -64,6 +64,9 @@ function num(v) {
 
 // Fill a raw entry's gaps from the .env defaults and normalise its types.
 function resolveEntry(entry, d) {
+  const id = String(entry.id);
+  const name = String(entry.name || id);
+  const workOrder = /^work-order(?:-|$)/i.test(id) || /^work order\b/i.test(name);
   const variant = String(entry.variant || d.variant).toLowerCase() === 'plain'
     ? 'plain'
     : 'qc';
@@ -122,12 +125,12 @@ function resolveEntry(entry, d) {
     ? entry.boldText.map((s) => String(s).trim()).filter(Boolean)
     : [];
   return {
-    id: String(entry.id),
-    name: String(entry.name || entry.id),
+    id,
+    name,
     group,
     modeGroup,
     mode,
-    templateId: String(entry.templateId || d.templateId),
+    templateId: String(entry.templateId || (workOrder ? '1' : d.templateId)),
     printerType: String(entry.printerType || d.printerType),
     printerId: entry.printerId ? String(entry.printerId) : null,
     agentUrl: String(entry.agentUrl || d.agentUrl).replace(/\/+$/, ''),
@@ -136,7 +139,7 @@ function resolveEntry(entry, d) {
     upright,
     models,
     weldingToPainting,
-    splitPartOneQty: entry.splitWoLabels === true && weldingToPainting && requireQrBinding && !reworkQrBinding && mode !== 'rework'
+    splitPartOneQty: weldingToPainting && requireQrBinding && !reworkQrBinding && mode !== 'rework'
       ? (Number.isInteger(entry.splitPartOneQty) && entry.splitPartOneQty >= 1 && entry.splitPartOneQty <= 49 ? entry.splitPartOneQty : 25)
       : null,
     processCodePrepend,

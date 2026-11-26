@@ -62,11 +62,13 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
         ...(req.params.id === '1' ? [
           { type: 'text', x: 145, y: 920, rotation: 270, font: '3', xMul: 1, yMul: 1, value: { kind: 'field', field: 'coNumber' } },
           { type: 'text', x: 345, y: 515, rotation: 270, font: '2', xMul: 1, yMul: 1, value: { kind: 'field', field: 'jtcNo' } },
+          { type: 'text', x: 445, y: 920, rotation: 270, font: '3', xMul: 1, yMul: 1, value: { kind: 'field', field: 'remarksLine1' } },
+          { type: 'text', x: 475, y: 920, rotation: 270, font: '3', xMul: 1, yMul: 1, value: { kind: 'field', field: 'remarksLine2' } },
         ] : [
           { type: 'text', x: 125, y: 955, rotation: 270, font: '2', xMul: 1, yMul: 1, value: { kind: 'field', field: 'coNumber' } },
         ]),
         ...(req.params.id === '14' && !customQuantityReady ? [] : [
-          { type: 'text', x: 200, y: 220, rotation: 270, font: '2', value: { kind: 'field', field: 'qty' } },
+          { type: 'text', x: 200, y: 220, rotation: 270, font: '2', xMul: 1, yMul: 1, value: { kind: 'field', field: 'qty' } },
         ]),
         { type: 'text', x: 245, y: 220, rotation: 270, font: '2', value: { kind: 'field', field: 'processCode' } },
         { type: 'barcode', x: 35, y: 925, rotation: 270, height: 40, codeType: '128', value: { kind: 'field', field: 'jtc_barcodeId', prefix: '*j' } },
@@ -85,7 +87,7 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       { id: 'fg', name: 'FG labels', group: 'P1', templateId: '11', doneOnly: true },
       { id: 'work', name: 'Work Orders', group: 'P3', templateId: '13', modeGroup: 'work', mode: 'normal' },
       { id: 'work-rework', name: 'Work Orders Rework', group: 'P3', templateId: '13', modeGroup: 'work', mode: 'rework', reworkQrBinding: true },
-      { id: 'binding', name: 'K2VG binding', group: 'P3', templateId: '13', models: ['K2VG'], weldingToPainting: true, requireQrBinding: true },
+      { id: 'binding', name: 'K2VG binding', group: 'P3', templateId: '1', models: ['K2VG'], weldingToPainting: true, requireQrBinding: true },
     ]));
     agentProcess = startService(path.join(agentSource, 'server.js'), { PRINT_AGENT_DATA_DIR: agentDir, PRINT_AGENT_CONFIG: configFile, PRINT_AGENT_MANAGEMENT_TOKEN: 'integration-only-token' });
     const agentUrl = 'http://127.0.0.1:' + agentPort;
@@ -126,6 +128,9 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       const staged = await api('/api/print', { jtcNo: '*j91002', location: 'binding' });
       assert.equal(staged.body.binding, true); assert.match(staged.body.printJtc, /40\/40/);
       const id = staged.body.id;
+      const layout = await api('/api/binding/label-count', { location: 'binding', id, labelCount: 1, previousLabelCount: 2 }, 'PUT');
+      assert.equal(layout.status, 200);
+      assert.equal(layout.body.jobs[0].labelCount, 1);
       assert.equal((await api('/api/binding/print', { location: 'binding', id })).body.ok, false);
       await api('/api/binding/scan', { location: 'binding', id, token: '2101' });
       assert.equal((await api('/api/binding/print', { location: 'binding', id })).body.ok, false);
@@ -133,6 +138,7 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       assert.equal((await api('/api/binding/print', { location: 'binding', id })).body.ok, true);
       await until(() => labels[1].length === 2);
       assert.equal(labels[0].length, 1);
+      assert.match(labels[1][1].toString(), /"Start QR: 2101"[\s\S]*"End QR: 3203"/);
     });
     let chromium;
     try { ({ chromium } = require('playwright')); } catch {}
@@ -417,6 +423,10 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       assert.deepEqual(errors, []); await page.close();
     });
     await t.test('sidebar Auto Print controls persist and stage new mock completions behind QR binding', { skip: !chromium }, async () => {
+      const autoLocation = 'auto-binding';
+      const configBefore = (await api('/api/settings/locations')).body;
+      const autoLabel = { ...configBefore.locations.find((l) => l.id === 'binding'), id: autoLocation, group: 'QA', name: 'Auto WO binding' };
+      assert.equal((await api('/api/settings/locations', { revision: configBefore.revision, locations: [...configBefore.locations, autoLabel] }, 'PUT')).status, 200);
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       await page.goto(base + '/settings.html#auto');
       await page.getByText('Auto Print settings loaded.', { exact: true }).waitFor();
@@ -424,28 +434,30 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       assert.equal(await page.locator('[data-settings-panel="auto"]').isVisible(), true);
       assert.equal(await page.locator('#autoPrintLabels input[data-location="work-rework"]').isDisabled(), true);
       await page.locator('#autoPrintEnabled').check(); await page.locator('#autoPrintSeconds').fill('1');
-      await page.locator('#autoPrintLabels input[data-location="binding"]').check();
+      await page.locator('#autoPrintLabels input[data-location="auto-binding"]').check();
       await page.getByRole('button', { name: 'Save Auto Print', exact: true }).click();
       await page.getByText('Auto Print saved. Changes are active now.', { exact: true }).waitFor();
       const config = await api('/api/settings/auto-print');
       assert.equal(config.body.enabled, true); assert.equal(config.body.status.started, true); assert.equal(config.body.pollMs, 1000);
-      assert.deepEqual(config.body.locations, ['binding']);
+      assert.deepEqual(config.body.locations, [autoLocation]);
       const labelsConfig = (await api('/api/settings/locations')).body;
-      const removal = await api('/api/settings/locations', { revision: labelsConfig.revision, locations: labelsConfig.locations.filter((l) => l.id !== 'binding') }, 'PUT');
+      const removal = await api('/api/settings/locations', { revision: labelsConfig.revision, locations: labelsConfig.locations.filter((l) => l.id !== autoLocation) }, 'PUT');
       assert.equal(removal.status, 400);
       const beforePrints = labels[0].length + labels[1].length;
-      const beforeBindings = (await api('/api/binding?location=binding')).body.jobs.length;
+      const bindings = async () => (await api('/api/binding?location=' + autoLocation)).body.jobs;
+      const beforeBindings = (await bindings()).length;
       assert.equal((await api('/api/dev/complete', { id: 91002 })).status, 200);
-      await until(async () => (await api('/api/binding?location=binding')).body.jobs.length > beforeBindings, 'New completion did not stage for QR binding');
+      await until(async () => (await bindings()).length > beforeBindings, 'New completion did not stage for QR binding');
+      assert.equal((await bindings())[0].labelCount, 2);
       assert.equal(labels[0].length + labels[1].length, beforePrints);
       await page.locator('#autoPrintEnabled').uncheck();
       await page.getByRole('button', { name: 'Save Auto Print', exact: true }).click();
       await page.getByText('Auto Print saved. Changes are active now.', { exact: true }).waitFor();
       assert.equal((await api('/api/auto')).body.started, false);
-      assert.equal((await api('/api/binding?location=binding')).body.jobs.length, beforeBindings + 1);
+      assert.equal((await bindings()).length, beforeBindings + 1);
       await page.reload(); await page.getByText('Auto Print settings loaded.', { exact: true }).waitFor();
       assert.equal(await page.locator('#autoPrintEnabled').isChecked(), false);
-      assert.equal(await page.locator('#autoPrintLabels input[data-location="binding"]').isChecked(), true);
+      assert.equal(await page.locator('#autoPrintLabels input[data-location="auto-binding"]').isChecked(), true);
       const qaDir = process.env.FG_UI_QA_DIR;
       if (qaDir) await page.screenshot({ path: path.join(qaDir, 'sidebar-auto-print-desktop.png'), fullPage: true });
       await page.getByRole('link', { name: 'Label configuration', exact: true }).click();
@@ -477,14 +489,16 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       assert.equal(direct.status, 200);
       assert.equal(direct.body.binding, true);
       const { id } = direct.body;
+      assert.equal((await bindings())[0].splitTotal, 46);
+      assert.deepEqual((await bindings())[0].parts.map((part) => part.qty), [23, 23]);
       const splitQuery = '?no=*j91001&location=split&bindingId=' + id + '&part=1';
       const model = (await api('/api/label/model' + splitQuery)).body;
       const fieldAt = (elements, x, y) => elements.find((el) => el.type === 'text' && el.x === x && el.y === y)?.text;
       assert.equal(fieldAt(model.elements, 145, 920), 'CO-2026-0047');
       assert.equal(fieldAt(model.elements, 345, 515), direct.body.printJtc);
-      const noOrder = (await api('/api/label/model?no=*j1002&location=split')).body;
-      assert.equal(fieldAt(noOrder.elements, 145, 920), '');
-      assert.equal(fieldAt(noOrder.elements, 345, 515), 'J2606-118A02TRX-LD');
+      const noCustomerOrder = (await api('/api/label/model?no=*j1002&location=split')).body;
+      assert.equal(fieldAt(noCustomerOrder.elements, 145, 920), '');
+      assert.equal(fieldAt(noCustomerOrder.elements, 345, 515), 'J2606-118A02TRX-LD');
       const woLine = 'TEXT 145,920,"3",270,1,1,"CO-2026-0047"';
       const jtcLine = `TEXT 345,515,"2",270,1,1,"${direct.body.printJtc}"`;
       const tsplPreview = await (await fetch(base + '/api/print/preview' + splitQuery)).text();
@@ -499,6 +513,10 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
         await page.locator('[aria-current="step"]').getByText('Pair 1 of 2', { exact: true }).waitFor();
         await page.locator('.b-pair--scanning').getByText('Scan now', { exact: true }).waitFor();
         await page.locator('#labelMount').getByText('1 OF 2', { exact: true }).waitFor();
+        assert.equal(await page.getByLabel('Part 1 quantity').inputValue(), '23');
+        assert.equal(await page.locator('#splitQuantityTwo').innerText(), '23');
+        assert.equal(await page.locator('#splitTotalNote').innerText(), 'Job total: 46.');
+        assert.equal(await page.getByRole('button', { name: 'Apply split', exact: true }).isDisabled(), true);
         await page.close();
       }
       assert.equal((await callBinding('scan', id, 1, '0101')).body.ok, true);
@@ -508,15 +526,17 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       const first = (await Promise.all([callBinding('print', id, 1), callBinding('print', id, 1)])).map((r) => r.body);
       assert.equal(first[0].id, first[1].id);
       assert.equal(first[0].jobs[0].currentPart, 2);
+      assert.equal((await api('/api/binding/split', { location: 'split', id, partOneQty: 20, previousQty: 23 }, 'PUT')).status, 409);
       assert.equal((await callBinding('remove', id)).status, 409);
       assert.equal((await callBinding('print', id, 2)).body.ok, false);
       assert.equal((await callBinding('scan', id, 1, '0101')).body.ok, false);
       assert.equal((await callBinding('scan', id, 2, '0101')).body.ok, true);
+      assert.equal((await callBinding('scan', id, 2, '2102')).body.ok, true);
       assert.equal((await callBinding('print', id, 2)).body.ok, false);
       await until(async () => (await printJobs())[0]?.status === 'done');
       await stopService(uiProcess); uiProcess = startUi();
       await until(async () => { if (uiProcess.exited) throw new Error(uiProcess.logs); try { return (await fetch(base + '/api/config')).ok; } catch { return false; } });
-      assert.equal((await bindings())[0].parts[1].startTag, 101);
+      assert.equal((await bindings())[0].parts[1].startTag, 2102);
       assert.equal((await stage()).body.id, id);
       assert.equal((await stage('split', '*j91001')).body.id, id);
 
@@ -525,7 +545,8 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
         await page.goto(base + '/');
         await page.getByRole('tab', { name: 'QA', exact: true }).click();
         await page.getByRole('tab', { name: 'Split WO', exact: true }).click();
-        await page.locator('#bindingState').getByText('Pair 2 of 2 · Qty 25', { exact: true }).waitFor();
+        await page.locator('#bindingState').getByText('Pair 2 of 2 · Qty 23', { exact: true }).waitFor();
+        assert.equal(await page.locator('#splitQuantityOne').isVisible(), false);
         const currentPair = page.locator('[aria-current="step"]');
         await currentPair.getByText('Pair 2 of 2', { exact: true }).waitFor();
         await currentPair.getByText('Scan now', { exact: true }).waitFor();
@@ -539,6 +560,7 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
         assert.equal(await marker.getAttribute('x'), '45');
         assert.equal(await marker.getAttribute('y'), '136');
         await page.locator('#labelMount').getByText('SB, PL', { exact: true }).waitFor();
+        await page.locator('#labelMount').getByText('Start QR: 2102', { exact: true }).waitFor();
         const qaDir = process.env.FG_UI_QA_DIR;
         if (qaDir) {
           await page.locator('#bindingPanel').screenshot({ path: path.join(qaDir, 'split-qr-binding.png') });
@@ -549,32 +571,23 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
         const input = page.locator('#jtcInput');
         await input.fill('2201'); await input.press('Enter');
         await page.locator('#bindingState').getByText('Bind complete', { exact: true }).waitFor();
+        await page.locator('#labelMount').getByText('End QR: 2201', { exact: true }).waitFor();
         assert.equal(await page.locator('.b-pair').getByText('Bind complete', { exact: true }).count(), 2);
         assert.equal(await page.locator('.b-pair--scanning').count(), 0);
         await page.getByRole('button', { name: 'Preview Pair 1', exact: true }).click();
         await page.locator('#labelMount').getByText('1 OF 2', { exact: true }).waitFor();
         const secondPair = page.locator('.b-pair').filter({ hasText: 'Pair 2 of 2' });
-        await secondPair.locator('.b-pill--green').getByText('0101', { exact: true }).waitFor();
+        await secondPair.locator('.b-pill--green').getByText('2102', { exact: true }).waitFor();
         await secondPair.locator('.b-pill--red').getByText('2201', { exact: true }).waitFor();
+        await page.locator('#labelMount').getByText('Start QR: 0101', { exact: true }).waitFor();
 
-        await page.goto(base + '/settings.html#labels');
-        await page.getByText('Label configuration loaded.', { exact: true }).waitFor();
-        await page.locator('#labelConfigSelect').selectOption({ label: 'QA · Custom split WO' });
-        const qty = page.locator('[data-label-field="splitPartOneQty"]');
-        assert.equal(await qty.inputValue(), '25'); await qty.fill('20');
-        await page.getByText('Part 2 quantity: 30 (total: 50)', { exact: true }).waitFor();
-        await page.getByRole('button', { name: 'Save label configuration', exact: true }).click();
-        await page.getByText('Label configuration saved. Return to printing to load the updated labels.', { exact: true }).waitFor();
         await page.close();
       } else {
         assert.equal((await callBinding('scan', id, 2, '2201')).body.ok, true);
         assert.equal((await callBinding('print', id, 2)).body.ok, true);
-        const settings = (await api('/api/settings/locations')).body;
-        assert.equal((await api('/api/settings/locations', { revision: settings.revision,
-          locations: settings.locations.map((loc) => loc.id === custom.id ? { ...loc, splitPartOneQty: 20 } : loc) }, 'PUT')).status, 200);
       }
       await until(async () => (await printJobs()).length === 2 && (await printJobs()).every((j) => j.status === 'done'));
-      assert.deepEqual((await printJobs()).map((j) => j.splitPart), [{ number: 1, qty: 25 }, { number: 2, qty: 25 }]);
+      assert.deepEqual((await printJobs()).map((j) => j.splitPart), [{ number: 1, qty: 23 }, { number: 2, qty: 23 }]);
       assert.equal((await callBinding('scan', id, 2, '2203')).body.ok, false);
       assert.equal((await callBinding('remove', id)).status, 200);
       assert.equal((await stage()).status, 409);
@@ -582,6 +595,52 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
 
       const location = custom.id;
       const customId = (await stage(location)).body.id;
+      const updateSplit = (partOneQty, previousQty = 23) => api('/api/binding/split', { location, id: customId, partOneQty, previousQty }, 'PUT');
+      assert.equal((await updateSplit(46)).status, 400);
+      assert.equal((await callBinding('scan', customId, 1, '2101', location)).body.ok, true);
+      await stopService(uiProcess);
+      const bindingFile = path.join(uiDir, 'binding-jobs.json');
+      const oldQueue = JSON.parse(fs.readFileSync(bindingFile, 'utf8'));
+      const legacyJob = oldQueue.jobs.find((job) => job.id === customId);
+      delete legacyJob.splitTotal;
+      for (const part of legacyJob.parts) part.qty = 25;
+      fs.writeFileSync(bindingFile, JSON.stringify(oldQueue));
+      uiProcess = startUi();
+      await until(async () => { if (uiProcess.exited) throw new Error(uiProcess.logs); try { return (await fetch(base + '/api/config')).ok; } catch { return false; } });
+      assert.equal((await bindings(location))[0].splitNeedsRefresh, true);
+      assert.match((await callBinding('print', customId, 1, undefined, location)).body.error, /Rescan this JTC/);
+      assert.equal((await stage(location)).body.id, customId);
+      assert.equal((await bindings(location))[0].splitTotal, 46);
+      if (chromium) {
+        const page = await browser.newPage({ viewport: { width: 390, height: 850 } });
+        await page.goto(base + '/');
+        await page.getByRole('tab', { name: 'QA', exact: true }).click();
+        await page.getByRole('tab', { name: 'Custom split WO', exact: true }).click();
+        const qty = page.getByLabel('Part 1 quantity');
+        await qty.waitFor();
+        assert.equal(await qty.inputValue(), '23');
+        assert.equal(await qty.getAttribute('max'), '45');
+        await qty.fill('15');
+        await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+        assert.equal(await qty.inputValue(), '23');
+        await qty.selectText();
+        await qty.pressSequentially('20');
+        await page.waitForResponse((response) => response.url().endsWith('/api/binding?location=custom-split'));
+        assert.equal(await qty.inputValue(), '20');
+        assert.equal(await page.locator('#splitQuantityTwo').innerText(), '26');
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        const qaDir = process.env.FG_UI_QA_DIR;
+        if (qaDir) await page.locator('#bindingPanel').screenshot({ path: path.join(qaDir, 'operator-adjust-split.png') });
+        await page.getByRole('button', { name: 'Apply split', exact: true }).click();
+        await page.locator('#status').getByText('Split saved: 20 + 26.', { exact: true }).waitFor();
+        await page.locator('.b-pair').filter({ hasText: 'Pair 2 of 2' }).getByText('Qty 26', { exact: true }).waitFor();
+        await page.close();
+      } else {
+        assert.equal((await updateSplit(20)).status, 200);
+      }
+      assert.deepEqual((await bindings(location))[0].parts.map((part) => part.qty), [20, 26]);
+      assert.equal((await bindings(location))[0].parts[0].startTag, 2101);
+      assert.equal((await updateSplit(21)).status, 409);
       for (const [part, tags] of [[1, ['2101', '2201']], [2, ['2102', '2202']]]) {
         for (const tag of tags) assert.equal((await callBinding('scan', customId, part, tag, location)).body.ok, true);
         assert.equal((await callBinding('print', customId, part, undefined, location)).body.ok, true);
@@ -609,10 +668,75 @@ test('fg-print-ui integrates with the real multi-printer agent using isolated da
       const printed = labels.flat().map((b) => b.toString()).filter((s) => /"[12] OF 2"/.test(s));
       assert.equal(printed.length, 4);
       assert.equal(printed.filter((s) => s.includes(woLine) && s.includes(jtcLine)).length, 2);
-      for (const [part, qty] of [[1, 25], [2, 25], [1, 20], [2, 30]]) {
-        const markerPosition = qty === 25 ? '45,136,"2",270' : '903,45,"2",0';
+      const splitLabels = printed.filter((s) => s.includes(woLine));
+      for (const [part, tag] of [[1, '0101'], [2, '2102']]) {
+        const text = splitLabels.find((s) => s.includes(`"${part} OF 2"`));
+        assert.ok(text.includes(`TEXT 445,920,"3",270,1,1,"Start QR: ${tag}"`));
+        assert.ok(text.includes('TEXT 475,920,"3",270,1,1,"End QR: 2201"'));
+      }
+      for (const [part, qty] of [[1, 23], [2, 23], [1, 20], [2, 26]]) {
+        const markerPosition = qty === 23 ? '45,136,"2",270' : '903,45,"2",0';
         assert.ok(printed.some((s) => s.includes(`TEXT ${markerPosition},1,1,"${part} OF 2"`) && s.includes('"' + qty + '"') && s.includes('"SB, PL"') && /BARCODE.*\*j91001/.test(s)));
       }
       assert.ok(printed.every((s) => !s.includes('QR PAIR')));
+    });
+    await t.test('operators can switch a default split to one full-quantity label on the printing page', { skip: !chromium }, async () => {
+      const location = 'operator-wo';
+      const config = (await api('/api/settings/locations')).body;
+      const label = { ...config.locations.find((l) => l.id === 'split'), id: location, name: 'Operator Work Order', splitWoLabels: false };
+      assert.equal((await api('/api/settings/locations', { revision: config.revision, locations: [...config.locations, label] }, 'PUT')).status, 200);
+      const { id } = (await api('/api/print', { jtcNo: '*j91001', location })).body;
+      const printJobs = async () => (await api('/api/queue')).body.jobs.filter((j) => j.location === location);
+      const scan = (token, partNumber) => api('/api/binding/scan', { location, id, token, partNumber });
+      assert.equal((await scan('2101', 1)).body.ok, true);
+      const page = await browser.newPage({ viewport: { width: 390, height: 850 } });
+      const count = page.getByRole('combobox', { name: 'WO labels' });
+      const openLabel = async () => {
+        await page.goto(base + '/');
+        await page.getByRole('tab', { name: 'QA', exact: true }).click();
+        await page.getByRole('tab', { name: 'Operator Work Order', exact: true }).click();
+        await count.waitFor();
+      };
+      try {
+        await openLabel();
+        assert.equal(await count.inputValue(), '2');
+        const choose = async (value) => {
+          const response = page.waitForResponse((r) => r.url().endsWith('/api/binding/label-count'));
+          await count.selectOption(value);
+          assert.equal((await response).ok(), true);
+        };
+        await choose('1');
+        await page.getByText('Full job quantity: 46', { exact: true }).waitFor();
+        assert.equal(await page.locator('#splitForm').isHidden(), true);
+        await choose('2');
+        await page.getByLabel('Part 1 quantity').waitFor();
+        assert.equal(await page.getByLabel('Part 1 quantity').inputValue(), '23');
+        await choose('1');
+        await page.getByText('Full job quantity: 46', { exact: true }).waitFor();
+        await openLabel();
+        assert.equal(await count.inputValue(), '1');
+        await page.locator('.b-pill--green').getByText('2101', { exact: true }).waitFor();
+        await page.locator('#labelMount').getByText('46', { exact: true }).waitFor();
+        assert.equal(await page.locator('#labelMount').getByText('1 OF 2', { exact: true }).count(), 0);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        assert.equal((await scan('2201', 1)).body.ok, false);
+        assert.equal((await printJobs()).length, 0);
+        const input = page.locator('#jtcInput');
+        await input.fill('2201'); await input.press('Enter');
+        await page.locator('#bindingState').getByText('Bind complete', { exact: true }).waitFor();
+        await until(async () => (await printJobs())[0]?.status === 'done');
+        assert.equal(await count.isDisabled(), true);
+        const locked = await api('/api/binding/label-count', { location, id, labelCount: 2, previousLabelCount: 1 }, 'PUT');
+        assert.equal(locked.status, 409);
+        assert.equal((await api('/api/binding/print', { location, id })).body.id, (await printJobs())[0].id);
+        assert.equal((await printJobs()).length, 1);
+        assert.equal((await printJobs())[0].workOrderQty, 46);
+        const tspl = labels.flat().map((buf) => buf.toString()).findLast((text) => text.includes('"End QR: 2201"'));
+        assert.match(tspl, /TEXT 200,220,"2",270,1,1,"46"/);
+        assert.match(tspl, /"Start QR: 2101"/);
+        assert.doesNotMatch(tspl, /"[12] OF 2"/);
+      } finally {
+        await page.close();
+      }
     });
   });

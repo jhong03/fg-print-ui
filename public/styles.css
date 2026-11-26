@@ -413,6 +413,17 @@ html, body {
 }
 .binding__title { font-weight: 600; }
 .binding__state { font-size: 13px; color: var(--ink-soft); }
+.binding__layout { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 10px; font-size: 14px; }
+.binding__layout label { font-weight: 600; }
+.binding__layout select { color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.binding__layout span { color: var(--ink-soft); }
+.binding__split { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.binding__split .btn { padding: 6px 10px; font-size: 14px; }
+.binding__split-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.binding__split-fields label { display: grid; gap: 4px; font-size: 13px; }
+.binding__split-fields input,
+.binding__split-fields output { display: block; width: 7em; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: 600 14px var(--sans); }
+.binding__split-fields input { background: var(--surface); }
 .binding__list { list-style: none; margin: 12px 0 0; padding: 0; }
 .b-item {
   display: flex;

@@ -20,7 +20,7 @@ function buildModel(template, record, opts = {}) {
 
   // Same variant + model-row collapse the printer gets, so preview == print.
   const variantEls = applyVariant(template.elements || [], opts.variant);
-  const split = prepareSplitWorkOrder(variantEls, mapRecordToFields(record, opts.templateId), opts.splitPart);
+  const split = prepareSplitWorkOrder(variantEls, mapRecordToFields(record, opts.templateId, opts.qrTags), opts.splitPart);
   const { elements: src, values } = collapseModelRow(split.elements, split.values);
   // Wrap against the printed positions, exactly as renderTspl does, so the
   // preview's line breaks match the label's.

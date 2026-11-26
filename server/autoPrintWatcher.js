@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const { atomicWrite, fail } = require('./localStore');
 const { validateAutoPrint } = require('./autoPrintSettings');
-const { isLeakTest, resolvePainting } = require('./paintingFlow');
+const { isLeakTest, resolvePainting, workOrderQuantity } = require('./paintingFlow');
 class AutoPrintWatcher {
   constructor({ settings, file, db, locations, printQueue, bindingQueue, clock = Date.now }) {
     Object.assign(this, { settings, file, db, locations, printQueue, bindingQueue, clock });
@@ -59,8 +59,23 @@ class AutoPrintWatcher {
           if (!isLeakTest(row.processCode) || !String(row.parentJtcNo || '').trim()) continue;
           printJtc = String(row.parentJtcNo).trim(); sourceJtc = row.jtcNo;
         }
-        if (loc.requireQrBinding) this.bindingQueue.add(printJtc, loc.id, sourceJtc, 'normal', loc.splitPartOneQty);
-        else this.printQueue.add(printJtc, loc.id, sourceJtc);
+        if (loc.requireQrBinding) {
+          const target = loc.splitPartOneQty == null ? null : await this.db.getOne(printJtc);
+          if (!current()) return;
+          this.locations.assertUnchanged?.(loc);
+          try {
+            this.bindingQueue.add(printJtc, loc.id, sourceJtc, 'normal', loc, workOrderQuantity(target));
+          } catch (err) {
+            if (err.code === 'WORK_ORDER_ALREADY_QUEUED') {
+              this.printedIds.add(id); this.persist();
+              continue;
+            }
+            if (err.status !== 422) throw err;
+            this.lastError = `${printJtc}: ${err.message}`;
+            console.warn('[auto]', this.lastError);
+            continue;
+          }
+        } else this.printQueue.add(printJtc, loc.id, sourceJtc);
         this.printedIds.add(id); this.persist();
         this.lastQueued = { jtcNo: printJtc, sourceJtc: row.jtcNo, model: row.model, location: loc.id };
       }
@@ -122,7 +137,7 @@ class AutoPrintWatcher {
     }
     this.locations.assertUnchanged(loc);
     if (loc.requireQrBinding) {
-      const result = this.bindingQueue.add(target.jtcNo, loc.id, sourceJtc, 'normal', loc.splitPartOneQty);
+      const result = this.bindingQueue.add(target.jtcNo, loc.id, sourceJtc, 'normal', loc, workOrderQuantity(target));
       return { ok: true, jtcNo, printJtc: target.jtcNo, sourceJtc, model: record.model, location: loc.id, staged: true, bindingId: result.id };
     }
     const result = this.printQueue.add(target.jtcNo, loc.id, sourceJtc);

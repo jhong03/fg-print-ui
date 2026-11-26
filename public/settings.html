@@ -111,7 +111,7 @@
               <label>Label ID<input data-label-field="id" required pattern="[a-zA-Z0-9_-]{1,128}" maxlength="128" /><span class="help">Saved IDs stay fixed to keep assignments and jobs linked.</span></label>
               <label>Label name<input data-label-field="name" required maxlength="256" /></label>
               <label>Group<input data-label-field="group" maxlength="256" placeholder="P1 or P3" /></label>
-              <label>Template ID<input data-label-field="templateId" maxlength="128" pattern="[a-zA-Z0-9_-]+" /><span class="help">Blank uses this terminal's default template.</span></label>
+              <label>Template ID<input data-label-field="templateId" maxlength="128" pattern="[a-zA-Z0-9_-]+" /><span class="help">Work Orders default to template 1. Other labels use the terminal default when blank.</span></label>
               <label class="label-config-wide">Models<textarea data-label-field="models" rows="2" placeholder="K2VG, K2SA"></textarea><span class="help">Separate models with commas or new lines. Blank allows all models for manual lookup. Choose watched labels in Auto Print.</span></label>
               <label>Mode<select data-label-field="mode"><option value="">No mode toggle</option><option value="normal">Normal</option><option value="rework">Rework</option></select></label>
               <label>Mode group<input data-label-field="modeGroup" maxlength="256" placeholder="work-order-p3-k2vg" /><span class="help">Use the same key for one Normal and one Rework label in the same group. They appear as one page with a mode switch.</span></label>
@@ -123,8 +123,7 @@
               <p class="help label-config-wide">Untick the selected QR option to switch. Leave both unticked for no QR binding.</p>
               <div class="setting-option"><label class="checkbox-label"><input data-label-field="weldingToPainting" type="checkbox" aria-describedby="paintingFlowHelp" />Leak Test → Painting label</label><p id="paintingFlowHelp" class="help">Uses the Leak Test job's linked Painting job for the label. When off, uses the entered job.</p></div>
               <div class="setting-option"><label class="checkbox-label"><input data-label-field="doneOnly" type="checkbox" aria-describedby="completedJobsHelp" />Completed jobs only</label><p id="completedJobsHelp" class="help">Only lists and prints jobs marked completed in the database. Untick to also allow unfinished jobs.</p></div>
-              <div class="setting-option"><label class="checkbox-label"><input data-label-field="splitWoLabels" type="checkbox" aria-describedby="splitWoHelp" />Split into two WO labels</label><p id="splitWoHelp" class="help">Requires Green/Red QR binding and Leak Test → Painting. Scan both tags for each label. The same codes can be reused.</p></div>
-              <label>Part 1 quantity<input data-label-field="splitPartOneQty" type="number" min="1" max="49" step="1" aria-describedby="splitQtyHelp" /><span id="splitQtyHelp" class="help" aria-live="polite">Part 2 quantity: 25 (total: 50)</span></label>
+              <label>Default Part 1 quantity per 50 pieces<input data-label-field="splitPartOneQty" type="number" min="1" max="49" step="1" aria-describedby="splitQtyHelp" /><span id="splitQtyHelp" class="help">Used when the operator chooses two WO labels on the printing page.</span></label>
               <label>Process code prefix<input data-label-field="processCodePrepend" maxlength="256" placeholder="SB" aria-describedby="processCodeHelp" /><span id="processCodeHelp" class="help">Adds a prefix to the Painting label's process code (e.g. PL → SB, PL). Blank keeps the original code. Requires Leak Test → Painting.</span></label>
               <div><label for="stockLocation">Stock location<select id="stockLocation" data-label-field="toLocation" aria-describedby="stockLocationHelp stockLocationStatus"><option value="">Any location</option></select></label><p id="stockLocationHelp" class="help">Only accepts jobs assigned to this stock location. Choose Any location to allow all locations.</p><p id="stockLocationStatus" class="help" role="status">Loading active stock locations…</p><button type="button" id="reloadStockLocations" class="btn btn--sm btn--ghost">Refresh locations</button></div>
               <label class="label-config-wide">QR workcell reference<input data-label-field="qrWorkcell" maxlength="256" aria-describedby="qrWorkcellHelp" /><span id="qrWorkcellHelp" class="help">Optional note to identify the workcell. This does not change which QR tags the scanner accepts.</span></label>
@@ -182,7 +181,7 @@
   <script src="settings-navigation.js?v=1"></script>
   <script src="printer-status-message.js?v=1"></script>
   <script src="settings.js?v=6"></script>
-  <script src="label-settings.js?v=5"></script>
+  <script src="label-settings.js?v=7"></script>
   <script src="auto-print-settings.js?v=1"></script>
 </body>
 </html>

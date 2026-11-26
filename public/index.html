@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>JTC Lookup</title>
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="stylesheet" href="styles.css?v=28" />
 </head>
 <body>
   <main class="page">
@@ -42,6 +42,23 @@
         <span id="bindingTitle" class="binding__title">QR binding required</span>
         <span id="bindingState" class="binding__state"></span>
       </div>
+      <div id="workOrderLayout" class="binding__layout" hidden>
+        <label for="workOrderLabelCount">WO labels</label>
+        <select id="workOrderLabelCount" aria-describedby="workOrderLayoutNote">
+          <option value="1">One label</option>
+          <option value="2">Two labels (split)</option>
+        </select>
+        <span id="workOrderLayoutNote"></span>
+      </div>
+      <form id="splitForm" class="binding__split" aria-label="Work Order split quantities" hidden>
+        <div class="binding__split-fields">
+          <label>Part 1 quantity<input id="splitQuantityOne" type="number" min="1" step="1" inputmode="numeric" required /></label>
+          <label for="splitQuantityTwo">Part 2 quantity<output id="splitQuantityTwo" for="splitQuantityOne"></output></label>
+          <button id="saveSplit" class="btn" type="submit">Apply split</button>
+          <button id="cancelSplit" class="btn btn--ghost" type="button">Cancel</button>
+        </div>
+        <p id="splitTotalNote" class="binding__note"></p>
+      </form>
       <ul id="bindingList" class="binding__list"></ul>
       <p id="bindingError" class="binding__error" role="alert" hidden></p>
       <p id="bindingNote" class="binding__note">Scan this workcell's <b class="dot dot--green">Green (Start)</b> and <b class="dot dot--red">Red (End)</b> QR tags to release the label. Wrong tag? It's rejected — just scan the correct one.</p>
@@ -97,6 +114,6 @@
 
   <script src="/vendor/JsBarcode.all.min.js"></script>
   <script src="labelPreview.js?v=21"></script>
-  <script src="app.js?v=32"></script>
+  <script src="app.js?v=40"></script>
 </body>
 </html>

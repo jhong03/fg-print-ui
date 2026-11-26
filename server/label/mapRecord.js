@@ -20,7 +20,7 @@ function formatDate(v) {
   return s;
 }
 
-function mapRecordToFields(r, templateId) {
+function mapRecordToFields(r, templateId, qrTags) {
   const jtcNo = (r.jtcNo || '').trim();
   const isWorkOrderTemplate = String(templateId) === '1';
   // Barcode encodes ONLY the JTC barcode id. When a job has none, we leave this
@@ -29,10 +29,13 @@ function mapRecordToFields(r, templateId) {
   const barcode = r.barcodeId != null && r.barcodeId !== ''
     ? String(r.barcodeId)
     : '';
+  const startTag = isWorkOrderTemplate ? qrTags?.startTag : null;
+  const endTag = isWorkOrderTemplate ? qrTags?.endTag : null;
 
   return {
     woNumber: r.woNumber || '',
     // Template 1 binds W.O. NO. to coNumber and has a dedicated JTC NO. field.
+    // The W.O. value comes from CustomerOrder.OrderNumber.
     // Other templates still rely on the older coNumber binding for the JTC.
     coNumber: isWorkOrderTemplate ? String(r.coNo ?? '').trim() : jtcNo,
     ...(isWorkOrderTemplate ? { jtcNo } : {}),
@@ -45,9 +48,6 @@ function mapRecordToFields(r, templateId) {
     customer: r.customer || '',
     model: r.model || '',
 
-    // The catalog has NO dedicated "Part No" key, so feed the part number into a
-    // free "Components" slot; bind P1's "Part No" element to remarksLine1. Nothing
-    // else binds remarksLine1 (P3 uses remarksLine3/4), so P3 is unaffected.
     partName: r.partNo || '',   // P1 "Part No" (Product.PartNumber)
 
     // Work Order (P3) label fields.
@@ -55,9 +55,10 @@ function mapRecordToFields(r, templateId) {
     processCode: r.processCode || '',
     empNo: r.empNo || '',
 
-    // Not sourced / unused by any current template.
+    ...(isWorkOrderTemplate ? { remarksLine1: startTag == null ? '' : `Start QR: ${String(startTag).padStart(4, '0')}` } : {}),
+    remarksLine2: endTag == null ? '' : `End QR: ${String(endTag).padStart(4, '0')}`,
     binId: '', lotNumber: '',
-    remarksLine2: '', remarksLine3: '', remarksLine4: '',
+    remarksLine3: '', remarksLine4: '',
     weightLine1: '', weightLine2: '', weightLine3: '', weightLine4: '',
   };
 }

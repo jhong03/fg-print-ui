@@ -46,7 +46,6 @@
       if (field.type === 'checkbox') field.checked = key === 'upright' ? loc[key] !== false : loc[key] === true;
       else field.value = Array.isArray(loc[key]) ? loc[key].join(key === 'models' ? ', ' : '\n') : loc[key] ?? (key === 'splitPartOneQty' ? 25 : '');
       if (key === 'id') field.readOnly = savedIds.has(loc.id);
-      if (key === 'templateId') field.placeholder = config.defaults.templateId || '';
       if (key === 'barcodeNudge') field.placeholder = String(config.defaults.barcodeNudge ?? 0);
       if (key === 'agentUrl') field.placeholder = config.defaults.agentUrl || '';
     }
@@ -61,16 +60,8 @@
     for (const field of [greenRed, rework]) field.closest('label').classList.toggle('qr-binding-disabled', field.disabled);
     const paintingFlow = fields.find((field) => field.dataset.labelField === 'weldingToPainting');
     fields.find((field) => field.dataset.labelField === 'processCodePrepend').disabled = !paintingFlow.checked;
-    const split = fields.find((field) => field.dataset.labelField === 'splitWoLabels');
     const partOne = fields.find((field) => field.dataset.labelField === 'splitPartOneQty');
-    split.disabled = !paintingFlow.checked || !greenRed.checked || rework.checked;
-    if (split.disabled) split.checked = draft[selected].splitWoLabels = false;
-    partOne.disabled = !split.checked;
-    partOne.required = split.checked;
-    const qty = partOne.valueAsNumber;
-    $('splitQtyHelp').textContent = Number.isInteger(qty) && qty >= 1 && qty <= 49
-      ? 'Part 2 quantity: ' + (50 - qty) + ' (total: 50)'
-      : 'Enter a whole number from 1 to 49.';
+    partOne.disabled = !paintingFlow.checked || !greenRed.checked || rework.checked;
   }
   function renderStockLocations() {
     const select = $('stockLocation'), current = draft[selected]?.toLocation;

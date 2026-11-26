@@ -67,8 +67,8 @@ module.exports = {
   //   coNo      = CustomerOrder.OrderNumber (C/O No) via
   //               Job.COItemId -> CustomerOrderItem -> CustomerOrder
   // coNo is LEFT JOINed, so make-to-stock jobs (no customer order) blank it.
-  // Keep jtcNo (Job.OrderNumber) and coNo separate. Template 1 uses coNo for
-  // W.O. NO. and jtcNo for JTC NO. via the label field mapper.
+  // The label field mapper uses coNo for template 1's W.O. NO. and jtcNo
+  // (Job.OrderNumber) for its JTC NO.
   // Tables are dbo.* — the pool connects to MSSQL_DATABASE.
   mssql: (() => {
     // Shared SELECT list + FROM/JOINs so getOne and getCompletedSince always

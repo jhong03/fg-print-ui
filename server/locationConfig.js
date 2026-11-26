@@ -43,7 +43,6 @@ function validateLocations(input) {
     if (loc.requireQrBinding && loc.reworkQrBinding) error('Choose either Green/Red binding or Black Rework binding.');
     if ((loc.reworkQrBinding && loc.mode === 'normal') || (loc.requireQrBinding && loc.mode === 'rework')) error('The QR binding option must match the selected mode.');
     if (loc.weldingToPainting && (loc.reworkQrBinding || loc.mode === 'rework')) error('Welding to Painting is for the Normal flow.');
-    if (loc.splitWoLabels && (!loc.weldingToPainting || !loc.requireQrBinding)) error('Split WO labels require Leak Test → Painting and Green/Red QR binding.');
     if (loc.splitPartOneQty != null && (!Number.isInteger(loc.splitPartOneQty) || loc.splitPartOneQty < 1 || loc.splitPartOneQty > 49)) error('Part 1 quantity must be a whole number from 1 to 49.');
     const key = loc.modeGroup || loc.id;
     if (!pairs.has(key)) pairs.set(key, []);

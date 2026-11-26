@@ -85,11 +85,16 @@ test('new watched labels skip their backlog without skipping existing destinatio
 
 test('QR-gated completion routes still stage the Painting job and never send directly', async (t) => {
   const f = fixture(t, false);
-  f.labels.find((label) => label.id === 'q').splitPartOneQty = 20;
+  const label = f.labels.find((label) => label.id === 'q');
+  label.splitPartOneQty = 20;
+  f.dependencies.db.getOne = async (jtc) => {
+    assert.equal(jtc, 'PAINT-1');
+    return { reqQty: 13, qty: 0 };
+  };
   await f.watcher.configure({ enabled: true, locations: ['q'], pollMs: 15000 }, f.settings.read().revision);
   f.rows = [row(1, 'Q', 11, { processCode: 'LKT', parentJtcNo: 'PAINT-1' }), row(2, 'Q', 12, { processCode: 'WD', parentJtcNo: 'PAINT-2' })];
   await f.watcher.poll(); assert.equal(f.prints.length, 0);
-  assert.deepEqual(f.bindings, [['PAINT-1', 'q', 'J1', 'normal', 20]]);
+  assert.deepEqual(f.bindings, [['PAINT-1', 'q', 'J1', 'normal', label, 13]]);
   assert.throws(() => f.watcher.validateLocations(f.labels.filter((l) => l.id !== 'q')), /no longer exists/);
 });
 

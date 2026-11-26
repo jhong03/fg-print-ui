@@ -48,20 +48,20 @@ class PrintQueue {
   }
   assertWritable() { if (this.stopped) throw fail(this.fault || 'Print queue is shutting down', 503); }
   findSplitPrint(releaseKey) { return this.splitReleases[releaseKey]; }
-  add(jtcNo, location, sourceJtc, splitPart) {
+  add(jtcNo, location, sourceJtc, { splitPart, workOrderQty, qrTags, releaseKey = splitPart?.releaseKey } = {}) {
     this.assertWritable();
     if (this.settingsBusy) throw fail('Printer settings are being saved. Try this job again shortly.', 409);
-    const existing = splitPart && this.findSplitPrint(splitPart.releaseKey);
-    if (existing != null && splitPart) return { id: existing };
+    const existing = releaseKey && this.findSplitPrint(releaseKey);
+    if (existing != null) return { id: existing };
     const options = structuredClone(this.locations.get(location));
     const target = { agentUrl: options.agentUrl, printerId: options.printerId, printerType: options.printerType, resolved: false };
     const job = { id: ++this.seq, jtcNo: String(jtcNo).trim(), sourceJtc: sourceJtc || null,
       location: options.id, options, target, queueKey: this.agent.keyFor(target), status: 'queued', error: null, at: Date.now() };
+    if (qrTags) job.qrTags = { startTag: qrTags.startTag, endTag: qrTags.endTag };
     const lane = this.lane(job.queueKey, target);
-    if (splitPart) {
-      job.splitPart = { number: splitPart.number, qty: splitPart.qty };
-      this.splitReleases[splitPart.releaseKey] = job.id;
-    }
+    if (splitPart) job.splitPart = { number: splitPart.number, qty: splitPart.qty };
+    if (workOrderQty != null) job.workOrderQty = workOrderQty;
+    if (releaseKey) this.splitReleases[releaseKey] = job.id;
     this.jobs.push(job); this.persist(); this.kick();
     return { id: job.id, position: this.jobs.filter((j) => j.queueKey === job.queueKey && pending(j)).length, paused: lane.paused };
   }
@@ -74,7 +74,7 @@ class PrintQueue {
       jobs: this.jobs.map((j) => ({ id: j.id, jtcNo: j.jtcNo, sourceJtc: j.sourceJtc || null,
         location: j.location, queueKey: j.queueKey, printerId: j.target.printerId || null,
         printerName: j.target.printerName || this.lanes[j.queueKey]?.name,
-        splitPart: j.splitPart, status: j.status, error: j.error || null })) };
+        splitPart: j.splitPart, workOrderQty: j.workOrderQty, status: j.status, error: j.error || null })) };
   }
   selected(key) {
     if (key && !this.lanes[key]) throw fail('Printer queue no longer exists. Refresh the page.', 404);
@@ -101,8 +101,8 @@ class PrintQueue {
   resolve(id, decision) {
     this.assertWritable();
     const job = this.jobs.find((j) => j.id === Number(id));
-    const failedSplit = job?.splitPart && job.status === 'error' && decision === 'retry';
-    if (!job || (job.status !== 'review' && !failedSplit)) throw fail('This job does not need outcome review.', 409);
+    const failedWorkOrder = (job?.splitPart || job?.workOrderQty != null) && job.status === 'error' && decision === 'retry';
+    if (!job || (job.status !== 'review' && !failedWorkOrder)) throw fail('This job does not need outcome review.', 409);
     if (!['sent', 'retry'].includes(decision)) throw fail('Choose sent or retry');
     job.error = null;
     if (decision === 'sent') job.status = 'done';
@@ -145,9 +145,13 @@ class PrintQueue {
         record = await this.db.getOne(job.jtcNo);
         if (!record) throw new Error('JTC not found');
         record = { ...record };
-        if (job.sourceJtc || job.splitPart) { prependProcessCode(record, job.options); applyWorkOrderFields(record); }
+        if (job.sourceJtc || job.splitPart || job.workOrderQty != null) {
+          prependProcessCode(record, job.options);
+          applyWorkOrderFields(record);
+        }
+        if (job.workOrderQty != null) record.qty = job.workOrderQty;
         const template = await this.getTemplate(job.options.templateId);
-        job.tspl = this.renderTspl(template, this.mapRecordToFields(record, job.options.templateId), { ...job.options, splitPart: job.splitPart });
+        job.tspl = this.renderTspl(template, this.mapRecordToFields(record, job.options.templateId, job.qrTags), { ...job.options, splitPart: job.splitPart });
       } catch (e) { job.status = 'error'; job.error = 'Render failed: ' + e.message; this.persist(); return 'continue'; }
       try { await this.agent.validateTarget(job.target); await this.checkReady(job.target); }
       catch (e) { return this.hold(job, e.message); }

@@ -61,9 +61,13 @@ function today() {
  *   - date = the day it's PRINTED (painting ActualEndDate is NULL -> would be blank).
  * Applied in place, only on the welding->painting path (preview + dispatch).
  */
+function workOrderQuantity(record) {
+  return record?.reqQty ?? record?.qty;
+}
+
 function applyWorkOrderFields(record) {
   if (!record) return record;
-  if (record.reqQty != null) record.qty = record.reqQty;
+  record.qty = workOrderQuantity(record);
   record.date = today();
   return record;
 }
@@ -94,4 +98,4 @@ async function resolvePainting(record, loc, db) {
   return { record, sourceJtc: null };
 }
 
-module.exports = { isLeakTest, resolvePainting, prependProcessCode, applyWorkOrderFields };
+module.exports = { isLeakTest, resolvePainting, prependProcessCode, applyWorkOrderFields, workOrderQuantity };

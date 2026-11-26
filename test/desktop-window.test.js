@@ -49,6 +49,11 @@ test('desktop window contains operator flow and printer settings without an exte
   desktop = await electron.launch({ executablePath: path.join(bundle, 'Label Printer.exe'), env });
   const page = await desktop.firstWindow();
   await page.waitForURL('http://localhost:' + uiPort + '/');
+  const windowState = () => desktop.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    return { minimized: win.isMinimized(), visible: win.isVisible() };
+  });
+  assert.deepEqual(await windowState(), { minimized: false, visible: true });
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.locator('#tabs button').first().waitFor();
   assert.deepEqual(await desktop.evaluate(({ app, BrowserWindow }) => ({ name: app.getName(), title: BrowserWindow.getAllWindows()[0].getTitle() })), { name: 'Label Printer', title: 'Label Printer' });
@@ -139,8 +144,24 @@ test('desktop window contains operator flow and printer settings without an exte
   const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'agent', 'config.json')));
   assert.equal(cfg.printers.length, 1);
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'print-queue.json')), false);
-  desktop = await electron.launch({ executablePath: path.join(bundle, 'Label Printer.exe'), env });
+  const executablePath = path.join(bundle, 'Label Printer.exe');
+  const minimizedArgs = ['--start-minimized'];
+  desktop = await electron.launch({ executablePath, env, args: minimizedArgs });
   const reopened = await desktop.firstWindow(); await reopened.waitForURL('http://localhost:' + uiPort + '/');
+  assert.deepEqual(await windowState(), { minimized: true, visible: false });
+  assert.equal((await fetch('http://localhost:' + uiPort + '/api/config')).ok, true);
+  async function launchAgain(args) {
+    await desktop.evaluate(({ app }) => {
+      globalThis.secondLaunch = new Promise((resolve) => app.once('second-instance', () => resolve(true)));
+    });
+    const child = spawn(executablePath, args, { env, windowsHide: true, stdio: 'ignore' });
+    assert.equal(await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); }), 0);
+    await desktop.evaluate(() => globalThis.secondLaunch);
+  }
+  await launchAgain(minimizedArgs);
+  assert.equal((await windowState()).minimized, true);
+  await launchAgain([]);
+  assert.deepEqual(await windowState(), { minimized: false, visible: true });
   await reopened.getByRole('link', { name: 'Printer settings', exact: true }).click();
   await reopened.getByRole('link', { name: 'Label configuration', exact: true }).click();
   await reopened.getByText('Label configuration loaded.', { exact: true }).waitFor();

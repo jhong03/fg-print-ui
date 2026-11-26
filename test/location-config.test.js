@@ -81,6 +81,11 @@ test('invalid label flows, pairs, model lists and IDs are rejected without repla
 });
 
 test('live label edits update resolved flow and stale IDs never fall back to another printer', () => {
+  const defaults = { ...locations.envDefaults(), templateId: '11' };
+  assert.equal(locations.resolveEntry({ id: 'work-order-p3-rework', name: 'Rework' }, defaults).templateId, '1');
+  assert.equal(locations.resolveEntry({ id: 'qa', name: 'Work Order (QA)' }, defaults).templateId, '1');
+  assert.equal(locations.resolveEntry({ id: 'qa', name: 'Work Order (QA)', templateId: '14' }, defaults).templateId, '14');
+  assert.equal(locations.resolveEntry({ id: 'fg', name: 'FG sticker' }, defaults).templateId, '11');
   const store = locations.configuration;
   store.save([{ id: 'one', name: 'First' }, { id: 'two', name: 'Second' }], store.read().revision); locations.invalidate();
   const old = locations.get('one');

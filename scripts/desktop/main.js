@@ -9,6 +9,8 @@ const readline = require('node:readline');
 const root = path.resolve(__dirname, '..', '..');
 const dataDir = path.resolve(process.env.FG_PRINT_DATA_DIR || path.join(process.env.LOCALAPPDATA || os.homedir(), 'FGPrint'));
 const smoke = process.argv.includes('--smoke');
+const minimizedFlag = '--start-minimized';
+let startMinimized = process.argv.includes(minimizedFlag);
 let window, supervisor, baseUrl, stopping = false, confirming = false, failure;
 app.setName('Label Printer');
 app.setAppUserModelId('Yollink.LabelPrinter');
@@ -99,7 +101,14 @@ if (smoke) {
   app.setPath('userData', path.join(dataDir, 'desktop'));
   if (!app.requestSingleInstanceLock()) app.exit(0);
   else {
-    app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
+    app.on('second-instance', (_event, args) => {
+      if (args.includes(minimizedFlag)) return;
+      startMinimized = false;
+      if (!window || window.isDestroyed()) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    });
     app.on('before-quit', (e) => { if (!stopping) { e.preventDefault(); requestQuit(); } });
     app.whenReady().then(async () => {
       const profile = session.fromPartition('persist:operator');
@@ -135,7 +144,9 @@ if (smoke) {
       window.webContents.on('render-process-gone', () => renderFailure('The operator screen stopped. Close and reopen Label Printer.'));
       menu();
       await window.loadFile(path.join(__dirname, 'starting.html'));
-      window.show(); startServices();
+      if (startMinimized) window.minimize();
+      else window.show();
+      startServices();
     }).catch((e) => { dialog.showErrorBox('Label Printer', e.message); app.exit(1); });
   }
 }

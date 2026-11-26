@@ -87,7 +87,13 @@
     ],
     "weldingToPainting": true,
     "processCodePrepend": "SB",
-    "requireQrBinding": true
+    "requireQrBinding": true,
+    "reworkQrBinding": false,
+    "doneOnly": false,
+    "splitWoLabels": true,
+    "splitPartOneQty": 25,
+    "boldTitle": false,
+    "boldText": []
   },
   {
     "id": "work-order-p3-k0wl-rework",
@@ -151,7 +157,13 @@
     ],
     "weldingToPainting": true,
     "processCodePrepend": "SB",
-    "requireQrBinding": true
+    "requireQrBinding": true,
+    "reworkQrBinding": false,
+    "doneOnly": false,
+    "splitWoLabels": true,
+    "splitPartOneQty": 25,
+    "boldTitle": false,
+    "boldText": []
   },
   {
     "id": "work-order-p3-k2pm-rework",

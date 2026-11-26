@@ -66,6 +66,14 @@ Electron's rendering engine is bundled inside the application. This is a portabl
 app folder, not an installer or Windows background service.
 No automatic startup or existing service changes are made by this package.
 
+START MINIMIZED AT SIGN-IN
+1. Press Windows+R, enter shell:startup and press Enter.
+2. Create a shortcut in that folder. Use the full path to your EXE followed
+   by --start-minimized, for example:
+   "C:\Label Printer\Label Printer.exe" --start-minimized
+3. At sign-in, Label Printer starts its services and stays minimized on the
+   taskbar. Click its taskbar icon or open the EXE normally to show it.
+
 PRIVATE PLANT BUILD: defaults\ui.env contains the current database connection
 settings, including credentials. Share this package only with approved terminals.
 It is not a public distribution. The interface does not receive those credentials.

@@ -91,32 +91,45 @@ function itemFor(location, id, mode) {
 function list(location) {
   const forLoc = jobs.filter((j) => !j.dismissed && (!location || j.location === location));
   const activeId = location && forLoc.length ? forLoc[0].id : null;
-  return forLoc.map((j) => ({
-    id: j.id,
-    paintingJtc: j.paintingJtc,
-    sourceJtc: j.sourceJtc || null,
-    location: j.location,
-    boundStart: !!j.boundStart,
-    boundEnd: !!j.boundEnd,
-    bindingMode: j.bindingMode || 'normal',
-    boundRework: !!j.boundRework,
-    reworkQrId: j.reworkQrId || null,
-    startTag: j.startTag || null,
-    endTag: j.endTag || null,
-    printed: !!j.printed,
-    ...(j.parts ? {
-      currentPart: j.parts.find((part) => part.printJobId == null)?.number ?? null,
-      parts: j.parts.map(({ number, qty, startTag, endTag, printJobId }) => ({ number, qty, startTag, endTag, printJobId })),
-    } : {}),
-    active: j.id === activeId,
-  }));
+  return forLoc.map((j) => {
+    const single = j.parts?.length === 1 ? j.parts[0] : null;
+    const startTag = single?.startTag ?? j.startTag ?? null;
+    const endTag = single?.endTag ?? j.endTag ?? null;
+    const editable = j.splitTotal >= 2 && !splitStarted(j);
+    return {
+      id: j.id,
+      paintingJtc: j.paintingJtc,
+      sourceJtc: j.sourceJtc || null,
+      location: j.location,
+      boundStart: single ? !!startTag : !!j.boundStart,
+      boundEnd: single ? !!endTag : !!j.boundEnd,
+      bindingMode: j.bindingMode || 'normal',
+      boundRework: !!j.boundRework,
+      reworkQrId: j.reworkQrId || null,
+      startTag,
+      endTag,
+      printed: !!j.printed,
+      ...(j.parts ? {
+        labelCount: j.parts.length,
+        labelCountEditable: editable,
+        splitTotal: j.splitTotal ?? null,
+        splitNeedsRefresh: splitNeedsRefresh(j),
+      } : {}),
+      ...(j.parts?.length === 2 ? {
+        currentPart: j.parts.find((part) => part.printJobId == null)?.number ?? null,
+        splitEditable: editable,
+        parts: j.parts.map(({ number, qty, startTag, endTag, printJobId }) => ({ number, qty, startTag, endTag, printJobId })),
+      } : {}),
+      active: j.id === activeId,
+    };
+  });
 }
 
 // ---- operations -----------------------------------------------------------
 // Stage a job for binding. Deduped by paintingJtc+location so the auto-trigger and
 // a manual scan of the same JTC don't create two rows. Returns the (existing or
 // new) item's public shape.
-function add(paintingJtc, location, sourceJtc, bindingMode = 'normal', splitPartOneQty = null) {
+function add(paintingJtc, location, sourceJtc, bindingMode, loc, jobQuantity) {
   const jtc = String(paintingJtc || '').trim();
   const mode = bindingMode === 'rework' ? 'rework' : 'normal';
   const existing = jobs.find((j) =>
@@ -125,8 +138,21 @@ function add(paintingJtc, location, sourceJtc, bindingMode = 'normal', splitPart
     (j.bindingMode || 'normal') === mode &&
     (!j.printed || j.parts)
   );
-  if (existing?.dismissed) throw fail('Both QR pairs for this Painting job were already queued. Check the print queue.', 409);
+  if (existing?.dismissed) {
+    throw Object.assign(fail('The Work Order labels for this Painting job were already queued. Check the print queue.', 409),
+      { code: 'WORK_ORDER_ALREADY_QUEUED' });
+  }
+  const useWorkOrder = mode === 'normal' && loc?.splitPartOneQty != null;
+  if (existing && useWorkOrder && (!existing.parts || splitNeedsRefresh(existing))) {
+    const total = validateWorkOrderTotal(jobQuantity);
+    const first = existing.parts?.[0] || newPart(1, total);
+    const parts = total > 1 && existing.parts
+      ? withSplitQuantities(existing, defaultSplitPartOne(total, loc.splitPartOneQty), total)
+      : [{ ...first, qty: total, startTag: first.startTag ?? existing.startTag, endTag: first.endTag ?? existing.endTag }];
+    replaceJob(existing, { splitTotal: total, parts, startTag: null, endTag: null });
+  }
   if (existing) return list(location).find((x) => x.id === existing.id);
+  const splitTotal = useWorkOrder ? validateWorkOrderTotal(jobQuantity) : null;
   const job = {
     id: ++seq,
     paintingJtc: jtc,
@@ -140,16 +166,89 @@ function add(paintingJtc, location, sourceJtc, bindingMode = 'normal', splitPart
     printed: false,
     at: Date.now(),
   };
-  if (mode === 'normal' && splitPartOneQty != null) {
-    job.parts = [splitPartOneQty, 50 - splitPartOneQty].map((qty, index) => ({
-      number: index + 1, qty, startTag: null, endTag: null, printJobId: null, releaseKey: randomUUID(),
-    }));
+  if (useWorkOrder) {
+    job.splitTotal = splitTotal;
+    const partOne = splitTotal >= 2 ? defaultSplitPartOne(splitTotal, loc.splitPartOneQty) : splitTotal;
+    job.parts = [newPart(1, partOne)];
+    if (partOne < splitTotal) job.parts.push(newPart(2, splitTotal - partOne));
     saveSplit([...jobs, job]);
   } else {
     jobs.push(job);
     persist();
   }
   return list(location).find((x) => x.id === job.id);
+}
+
+function splitStarted(job) {
+  return job.parts?.some((part) => part.printJobId != null || printQueue.findSplitPrint(part.releaseKey) != null);
+}
+
+function splitNeedsRefresh(job) {
+  return !!job.parts && job.splitTotal == null && !splitStarted(job);
+}
+
+const refreshSplitMessage = 'Rescan this JTC to load its job quantity before printing.';
+
+function validateWorkOrderTotal(jobQuantity) {
+  const total = Number(jobQuantity);
+  if (!Number.isSafeInteger(total) || total < 1) {
+    throw fail('A Work Order label requires a positive whole-piece job quantity.', 422);
+  }
+  return total;
+}
+
+function defaultSplitPartOne(total, partOnePer50) {
+  return Math.max(1, Math.min(total - 1, Math.floor(total * partOnePer50 / 50)));
+}
+
+function withSplitQuantities(job, partOne, total = job.splitTotal) {
+  return job.parts.map((part) => ({ ...part, qty: part.number === 1 ? partOne : total - partOne }));
+}
+
+function newPart(number, qty) {
+  return { number, qty, startTag: null, endTag: null, printJobId: null, releaseKey: randomUUID() };
+}
+
+function replaceJob(item, changes) {
+  saveSplit(jobs.map((job) => job === item ? { ...job, ...changes } : job));
+}
+
+function updateLabelCount(loc, id, labelCount, previousLabelCount) {
+  if (!Number.isInteger(id) || ![1, 2].includes(labelCount)) throw fail('Select a Work Order and choose one or two labels.');
+  const item = itemFor(loc.id, id, 'normal');
+  if (!item?.parts || loc.splitPartOneQty == null) throw fail('This Work Order is no longer available.', 404);
+  if (splitStarted(item)) throw fail('The label count is locked because a label has already been queued.', 409);
+  if (splitNeedsRefresh(item)) throw fail(refreshSplitMessage, 409);
+  if (item.parts.length === labelCount) return;
+  if (item.parts.length !== previousLabelCount) throw fail('The label count changed. Check the current choice and try again.', 409);
+  const total = item.splitTotal;
+  const [first] = item.parts;
+  if (labelCount === 1) {
+    replaceJob(item, { parts: [{ ...first, qty: total }], savedSplitQty: first.qty });
+  } else {
+    if (total < 2) throw fail('Two labels require a job quantity of at least 2 pieces.');
+    const qty = item.savedSplitQty ?? defaultSplitPartOne(total, loc.splitPartOneQty);
+    replaceJob(item, { parts: [{ ...first, qty }, newPart(2, total - qty)] });
+  }
+}
+
+function updateSplit(location, id, partOneQty, previousQty) {
+  if (!Number.isInteger(id)) throw fail('Select a split Work Order first.');
+  const item = itemFor(location, id, 'normal');
+  if (item?.parts?.length !== 2) throw fail('This split Work Order is no longer available.', 404);
+  if (splitStarted(item)) throw fail('The split is locked because Pair 1 has already been queued.', 409);
+  if (splitNeedsRefresh(item)) throw fail(refreshSplitMessage, 409);
+  const max = item.splitTotal - 1;
+  if (!Number.isSafeInteger(partOneQty) || partOneQty < 1 || partOneQty > max) {
+    throw fail(`Part 1 quantity must be a whole number from 1 to ${max}.`);
+  }
+  if (partOneQty === item.parts[0].qty) return;
+  if (previousQty !== item.parts[0].qty) throw fail('The split was changed. Cancel your edit to load the latest quantities.', 409);
+  replaceJob(item, { parts: withSplitQuantities(item, partOneQty) });
+}
+
+function requestedPartNumber(item, partNumber) {
+  return item.parts.length === 1 ? (partNumber == null ? 1 : null) : partNumber;
 }
 
 // Validate a scanned token against the ACTIVE item's workcell tags and record the
@@ -175,12 +274,13 @@ function scan(location, token, id, bindingMode = 'normal', partNumber) {
     return { ok: false, error: 'Unrecognised QR tag — expected a 4-digit tag (2nd digit 1 = Start, 2 = End).', item: snap() };
   }
   if (item.parts) {
+    if (splitNeedsRefresh(item)) return { ok: false, error: refreshSplitMessage, item: snap() };
     const part = item.parts.find((p) => p.printJobId == null);
-    if (!part) return { ok: false, error: 'Both QR pairs have already been queued.' };
-    if (part.number !== partNumber) return { ok: false, error: 'The active QR pair changed. Check the screen and scan again.' };
+    if (!part) return { ok: false, error: 'The Work Order labels have already been queued.' };
+    if (part.number !== requestedPartNumber(item, partNumber)) return { ok: false, error: 'The active QR pair changed. Check the screen and scan again.' };
     if (part.startTag && part.endTag) return { ok: false, error: 'This pair is complete. Queue its label before scanning more tags.' };
     const next = { ...part, [d.dir === 'start' ? 'startTag' : 'endTag']: d.tag };
-    saveSplit(jobs.map((j) => j !== item ? j : { ...j, parts: j.parts.map((p) => p === part ? next : p) }));
+    replaceJob(item, { parts: item.parts.map((p) => p === part ? next : p) });
     return { ok: true, role: d.dir, tag: d.tag, item: snap() };
   }
   // Only the direction (2nd digit) gates. Rescanning the same colour replaces its tag.
@@ -199,17 +299,23 @@ async function releasePrint(location, id, bindingMode = 'normal', partNumber) {
   const item = itemFor(location, id, mode);
   if (!item) return { ok: false, error: 'No job is waiting for QR binding on this station.' };
   if (item.parts) {
-    const part = item.parts.find((p) => p.number === partNumber);
+    if (splitNeedsRefresh(item)) return { ok: false, error: refreshSplitMessage };
+    const part = item.parts.find((p) => p.number === requestedPartNumber(item, partNumber));
     if (!part) return { ok: false, error: 'Select the active QR pair before releasing its label.' };
     if (part.printJobId != null) return { ok: true, queued: true, id: part.printJobId, partNumber };
     if (part !== item.parts.find((p) => p.printJobId == null) || !part.startTag || !part.endTag) {
       return { ok: false, error: 'Scan both QR tags for the active pair before printing.' };
     }
     const { number, qty, releaseKey } = part;
-    const result = printQueue.add(item.paintingJtc, item.location, item.sourceJtc, { number, qty, releaseKey });
+    const result = printQueue.add(item.paintingJtc, item.location, item.sourceJtc, {
+      splitPart: partNumber == null ? undefined : { number, qty },
+      workOrderQty: partNumber == null ? qty : undefined,
+      releaseKey,
+      qrTags: { startTag: part.startTag, endTag: part.endTag },
+    });
     const parts = item.parts.map((p) => p === part ? { ...p, printJobId: result.id } : p);
-    saveSplit(jobs.map((j) => j !== item ? j : { ...j, parts, printed: parts.every((p) => p.printJobId != null) }));
-    logBinding(item.paintingJtc, part.startTag, part.endTag, number)
+    replaceJob(item, { parts, printed: parts.every((p) => p.printJobId != null) });
+    logBinding(item.paintingJtc, part.startTag, part.endTag, partNumber)
       .catch((e) => console.error('[binding] qrLink error:', e.message));
     return { ok: true, queued: true, ...result, partNumber };
   }
@@ -256,7 +362,9 @@ async function releasePrint(location, id, bindingMode = 'normal', partNumber) {
     return { ok: false, error: 'Scan the Green (Start) and Red (End) QR tags before printing.' };
   }
   const firstRelease = !item.printed;
-  const r = printQueue.add(item.paintingJtc, item.location, item.sourceJtc);
+  const r = printQueue.add(item.paintingJtc, item.location, item.sourceJtc, {
+    qrTags: { startTag: item.startTag, endTag: item.endTag },
+  });
   item.printed = true;
   persist();
   // Log the QR<->JTC bind to Postgres on the FIRST release only (a reprint doesn't
@@ -297,7 +405,7 @@ function clear(location) {
 }
 
 function removeItems(matches) {
-  if (jobs.some((j) => matches(j) && j.parts && !j.printed && j.parts.some((p) => p.printJobId != null || printQueue.findSplitPrint(p.releaseKey)))) {
+  if (jobs.some((j) => matches(j) && !j.printed && splitStarted(j))) {
     throw fail('Finish both QR pairs before clearing this job.', 409);
   }
   // Keep a completed split's identity so rescanning it cannot create more labels.
@@ -309,4 +417,4 @@ function removeItems(matches) {
 
 load();
 
-module.exports = { add, list, scan, releasePrint, remove, clear };
+module.exports = { add, list, updateLabelCount, updateSplit, scan, releasePrint, remove, clear };

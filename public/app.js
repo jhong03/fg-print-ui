@@ -54,7 +54,7 @@ function hasBindingGate(loc = currentLocation) {
 function bindingInstructions(loc = currentLocation) {
   const mode = bindingModeFor(loc);
   if (mode === 'rework') return 'Scan the Black Rework QR (03xx) to release this label.';
-  if (loc?.splitPartOneQty != null) return 'Scan one Green Start and Red End pair for each WO label.';
+  if (loc?.splitPartOneQty != null) return 'Choose the number of WO labels, then scan one Green Start and Red End pair for each label.';
   if (mode === 'normal') return 'Scan the Green (Start) and Red (End) QR tags to release this label.';
   return '';
 }
@@ -236,6 +236,7 @@ function selectLocation(loc) {
   hideBindingError();
   selectedBinding = null;
   bindingPreview = null;
+  renderedBindingKey = '';
   // The template + variant just changed, so anything on screen is now stale.
   if (currentJtc) {
     renderLabelPreview(currentJtc, labelMount, currentLocation);
@@ -378,6 +379,7 @@ const GLOBAL_SETTLE_MS = 120; // no-Enter scanners: accept after this quiet gap
 
 document.addEventListener('keydown', (e) => {
   if (document.activeElement === input) return;   // the field owns its own input
+  if (e.target.closest?.('#splitForm')) return;
   if (e.ctrlKey || e.altKey || e.metaKey) return;
 
   const now = performance.now();
@@ -654,7 +656,7 @@ async function enqueuePrint(jtcNo, { fromScan } = {}) {
 
 // Fetch the rendered TSPL for the current JTC + destination into the panel.
 async function refreshTspl() {
-  const res = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc) + locQuery() + splitPreviewQuery());
+  const res = await fetch('/api/print/preview?no=' + encodeURIComponent(currentJtc) + locQuery() + bindingPreviewQuery());
   const text = await res.text();
   if (!res.ok) throw new Error(text || 'Preview failed');
   tsplView.textContent = text;
@@ -709,7 +711,7 @@ reloadTplBtn.addEventListener('click', async () => {
     setStatus('Template reloaded' + (body.name ? ': ' + body.name : '') + when + '.');
     // Reflect the new design: redraw the label, and the TSPL panel if it's open.
     if (currentJtc) {
-      renderLabelPreview(currentJtc, labelMount, currentLocation, splitPreviewQuery());
+      renderLabelPreview(currentJtc, labelMount, currentLocation, bindingPreviewQuery());
       if (!tsplPanel.hidden) await refreshTspl();
     }
   } catch (e) {
@@ -847,11 +849,12 @@ function renderQueue(q) {
     const details = document.createElement('div'); details.className = 'q-jtcwrap';
     const title = document.createElement('span'); title.className = 'q-jtc'; title.textContent = j.jtcNo; details.appendChild(title);
     if (j.sourceJtc) { const from = document.createElement('span'); from.className = 'q-source'; from.textContent = '↳ from ' + j.sourceJtc; details.appendChild(from); }
-    if (j.splitPart) {
+    if (j.splitPart || j.workOrderQty != null) {
       const part = document.createElement('span'); part.className = 'q-source';
-      part.textContent = splitPartTitle(j.splitPart); details.appendChild(part);
+      part.textContent = j.splitPart ? splitPartTitle(j.splitPart) : 'Qty ' + j.workOrderQty;
+      details.appendChild(part);
     }
-    if (j.status === 'review' || (j.splitPart && j.status === 'error')) {
+    if (j.status === 'review' || ((j.splitPart || j.workOrderQty != null) && j.status === 'error')) {
       const controls = document.createElement('div'); controls.className = 'q-review-actions';
       const decisions = j.status === 'review' ? [['sent', 'Mark as sent'], ['retry', 'Retry after checking']] : [['retry', 'Retry label']];
       for (const [decision, text] of decisions) {
@@ -975,6 +978,15 @@ const bindingNote = document.getElementById('bindingNote');
 const bindingList = document.getElementById('bindingList');
 const bindingState = document.getElementById('bindingState');
 const bindingError = document.getElementById('bindingError');
+const workOrderLayout = document.getElementById('workOrderLayout');
+const workOrderLabelCount = document.getElementById('workOrderLabelCount');
+const workOrderLayoutNote = document.getElementById('workOrderLayoutNote');
+const splitForm = document.getElementById('splitForm');
+const splitQuantityOne = document.getElementById('splitQuantityOne');
+const splitQuantityTwo = document.getElementById('splitQuantityTwo');
+const splitTotalNote = document.getElementById('splitTotalNote');
+const saveSplit = document.getElementById('saveSplit');
+const cancelSplit = document.getElementById('cancelSplit');
 
 // A QR workcell tag is a bare 4-digit number (WDSS). It only MEANS a binding scan
 // on a QR-gated tab — elsewhere 4 digits are just a normal search term.
@@ -995,21 +1007,126 @@ let bindingCleared = false;   // Clear deselects (blank preview) without touchin
 let lastMaxBindingId = 0;     // detect newly-staged jobs (ids ascend) to re-surface them
 let selectedBinding = null;
 let bindingPreview = null;
+let renderedBindingKey = '';
 let bindingReadVersion = 0;
+let splitEdit = null;
+let layoutSaving = null;
+
+function syncSplitEditor(job) {
+  const editable = job?.splitEditable === true;
+  if (!editable || splitEdit?.id !== job.id) splitEdit = null;
+  workOrderLayout.hidden = !job?.labelCount;
+  if (job?.labelCount) {
+    workOrderLabelCount.value = layoutSaving?.id === job.id ? layoutSaving.labelCount : job.labelCount;
+    workOrderLabelCount.disabled = !job.labelCountEditable || bindingReleasing || !!layoutSaving || !!splitEdit;
+    workOrderLayoutNote.textContent = job.labelCount === 1 ? 'Full job quantity: ' + job.splitTotal : '';
+  }
+  splitForm.hidden = !editable;
+  if (!editable) return;
+  splitQuantityOne.max = job.splitTotal - 1;
+  if (!splitEdit && splitQuantityOne.value !== String(job.parts[0].qty)) splitQuantityOne.value = job.parts[0].qty;
+  const remaining = splitQuantityOne.validity.valid ? String(job.splitTotal - splitQuantityOne.valueAsNumber) : '—';
+  if (splitQuantityTwo.value !== remaining) splitQuantityTwo.value = remaining;
+  splitQuantityOne.disabled = bindingReleasing || !!layoutSaving || !!splitEdit?.saving;
+  saveSplit.disabled = cancelSplit.disabled = !splitEdit || !!splitEdit.saving;
+  splitTotalNote.textContent = `Job total: ${job.splitTotal}.` + (splitEdit ? ' Apply or cancel changes to continue scanning.' : '');
+}
+
+workOrderLabelCount.addEventListener('change', async () => {
+  const job = selectedBinding;
+  if (!job?.labelCountEditable || layoutSaving || bindingReleasing || splitEdit) return;
+  const loc = currentLocation, epoch = locationEpoch;
+  const labelCount = Number(workOrderLabelCount.value);
+  layoutSaving = { id: job.id, labelCount };
+  syncSplitEditor(job);
+  printBtn.disabled = true;
+  try {
+    const res = await fetch('/api/binding/label-count', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: loc.id, id: job.id, labelCount, previousLabelCount: job.labelCount }),
+    });
+    const body = await res.json();
+    if (!sameLocation(loc, epoch)) return;
+    if (!res.ok) throw new Error(body.error || 'Could not change the label count.');
+    bindingReadVersion++;
+    bindingAutoReleaseBlockedId = null;
+    layoutSaving = null;
+    hideBindingError();
+    renderBinding(body.jobs);
+  } catch (err) {
+    if (sameLocation(loc, epoch)) {
+      showBindingError(err.message);
+      await refreshBinding();
+    }
+  } finally {
+    layoutSaving = null;
+    syncSplitEditor(selectedBinding);
+    if (sameLocation(loc, epoch)) input.focus({ preventScroll: true });
+  }
+});
+
+splitQuantityOne.addEventListener('input', () => {
+  if (!selectedBinding?.splitEditable || bindingReleasing || layoutSaving) return;
+  splitEdit ??= { id: selectedBinding.id, total: selectedBinding.splitTotal, previousQty: selectedBinding.parts[0].qty, saving: false };
+  syncSplitEditor(selectedBinding);
+  printBtn.disabled = true;
+});
+cancelSplit.addEventListener('click', () => {
+  splitEdit = null;
+  syncSplitEditor(selectedBinding);
+  input.focus({ preventScroll: true });
+  void refreshBinding();
+});
+splitForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const edit = splitEdit;
+  if (!edit || edit.saving || !splitQuantityOne.reportValidity()) return;
+  const loc = currentLocation, epoch = locationEpoch, partOneQty = splitQuantityOne.valueAsNumber;
+  edit.saving = true;
+  syncSplitEditor(selectedBinding);
+  try {
+    const res = await fetch('/api/binding/split', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: loc.id, id: edit.id, partOneQty, previousQty: edit.previousQty }),
+    });
+    const body = await res.json();
+    if (!sameLocation(loc, epoch) || splitEdit !== edit) return;
+    if (!res.ok) throw new Error(body.error || 'Could not apply the split.');
+    bindingReadVersion++;
+    splitEdit = null;
+    hideBindingError();
+    setStatus(`Split saved: ${partOneQty} + ${edit.total - partOneQty}.`);
+    renderBinding(body.jobs);
+    input.focus({ preventScroll: true });
+  } catch (err) {
+    if (sameLocation(loc, epoch) && splitEdit === edit) {
+      showBindingError(err.message);
+      await refreshBinding();
+    }
+  } finally {
+    if (splitEdit === edit) {
+      edit.saving = false;
+      syncSplitEditor(selectedBinding);
+    }
+  }
+});
 
 function splitPartTitle(part) { return 'Pair ' + part.number + ' of 2 · Qty ' + part.qty; }
-function splitPreviewQuery() {
-  return bindingPreview ? '&bindingId=' + bindingPreview.id + '&part=' + bindingPreview.part : '';
+function bindingPreviewQuery() {
+  if (!bindingPreview) return '';
+  return '&bindingId=' + bindingPreview.id + (bindingPreview.part ? '&part=' + bindingPreview.part : '');
 }
 function activeSplitPart(job) { return job?.parts?.find((part) => part.number === job.currentPart); }
 
-function renderSplitPairs(job, selected, previewJtc, jobs) {
+function renderSplitPairs(job, selected, jobs) {
   const cards = document.createElement('ol');
   cards.className = 'b-pairs';
   cards.setAttribute('aria-label', 'QR pairs');
 
   for (const part of job.parts) {
-    const current = selected && part.number === job.currentPart;
+    const current = selected && !job.splitNeedsRefresh && part.number === job.currentPart;
     const ready = !!(part.startTag && part.endTag);
     const card = document.createElement('li');
     card.className = 'b-pair';
@@ -1025,14 +1142,14 @@ function renderSplitPairs(job, selected, previewJtc, jobs) {
     title.textContent = 'Pair ' + part.number + ' of 2';
     const quantity = document.createElement('span');
     quantity.className = 'b-pair__qty';
-    quantity.textContent = 'Qty ' + part.qty;
+    quantity.textContent = job.splitNeedsRefresh ? 'Qty —' : 'Qty ' + part.qty;
     heading.append(title, quantity);
 
     const status = document.createElement('span');
     status.className = 'b-pair__status';
     if (ready) status.textContent = 'Bind complete';
     else if (current) status.textContent = 'Scan now';
-    else status.textContent = part.number === job.currentPart ? 'Waiting for scans' : 'Waiting for Pair 1';
+    else status.textContent = job.splitNeedsRefresh ? 'Rescan JTC' : part.number === job.currentPart ? 'Waiting for scans' : 'Waiting for Pair 1';
     card.append(heading, status);
 
     if (current || ready) {
@@ -1053,8 +1170,6 @@ function renderSplitPairs(job, selected, previewJtc, jobs) {
       preview.addEventListener('click', (event) => {
         event.stopPropagation();
         bindingPreview.part = part.number;
-        renderLabelPreview(previewJtc, labelMount, currentLocation, splitPreviewQuery());
-        if (!tsplPanel.hidden) void refreshTspl();
         renderBinding(jobs);
       });
       card.appendChild(preview);
@@ -1079,6 +1194,7 @@ function renderBinding(jobs) {
   const mode = bindingModeFor();
   const rework = mode === 'rework';
   if (!mode) {
+    syncSplitEditor(null);
     bindingPanel.hidden = true;
     printBtn.disabled = false;
     printBtn.textContent = 'Print label';
@@ -1105,14 +1221,16 @@ function renderBinding(jobs) {
   if (!sel && !bindingCleared) { sel = jobs.find((j) => j.currentPart === 2) || jobs[0] || null; selectedBindingId = sel ? sel.id : null; }
   if (!sel) selectedBindingId = null;
   selectedBinding = sel || null;
+  syncSplitEditor(selectedBinding);
   const activePart = activeSplitPart(sel);
-  const oldPreview = splitPreviewQuery();
   if (sel?.parts) {
     const stage = sel.currentPart ?? 0;
     if (bindingPreview?.id !== sel.id || bindingPreview.stage !== stage) {
       bindingPreview = { id: sel.id, stage, part: sel.currentPart || 2 };
     }
-  } else bindingPreview = null;
+  } else {
+    bindingPreview = sel && !rework && (sel.labelCount === 1 || String(currentLocation?.templateId) === '1') ? { id: sel.id } : null;
+  }
   const releaseKey = sel && (activePart ? sel.id + ':' + activePart.number : sel.id);
 
   // ONE preview, driven ONLY by the selected item (never by a separate manual
@@ -1120,12 +1238,16 @@ function renderBinding(jobs) {
   // (sourceJtc) so the server applies welding->painting + SB prepend and returns
   // provenance. Guard on currentJtc so we don't redraw what's already shown.
   const previewJtc = sel ? (sel.sourceJtc || sel.paintingJtc) : null;
-  if (previewJtc && (previewJtc !== currentJtc || oldPreview !== splitPreviewQuery())) {
+  const previewQuery = bindingPreviewQuery();
+  const tags = bindingPreview && (sel.parts ? sel.parts.find((part) => part.number === bindingPreview.part) : sel);
+  const renderKey = tags ? `${previewQuery}|${tags.startTag ?? ''}|${tags.endTag ?? ''}|${tags.qty ?? sel.splitTotal ?? ''}` : previewQuery;
+  if (previewJtc && (previewJtc !== currentJtc || renderedBindingKey !== renderKey)) {
+    renderedBindingKey = renderKey;
     currentJtc = previewJtc;
     emptyState.hidden = true;
     label.hidden = false;
     actions.hidden = false;
-    renderLabelPreview(previewJtc, labelMount, currentLocation, splitPreviewQuery())
+    renderLabelPreview(previewJtc, labelMount, currentLocation, previewQuery)
       .then((model) => { if (model) showProvenance(model); });
     if (!tsplPanel.hidden) void refreshTspl();
   }
@@ -1133,17 +1255,18 @@ function renderBinding(jobs) {
   // Gate the Print button + header to the SELECTED item.
   if (sel?.parts) {
     const ready = !!(activePart?.startTag && activePart.endTag);
-    printBtn.disabled = !ready || bindingReleasing;
+    printBtn.disabled = !ready || bindingReleasing || !!splitEdit || !!layoutSaving || sel.splitNeedsRefresh;
     printBtn.textContent = activePart ? (ready ? 'Queue Pair ' + activePart.number : 'Scan QR to print') : 'Both pairs queued';
     const allBound = sel.parts.every((part) => part.startTag && part.endTag);
-    bindingState.textContent = allBound ? 'Bind complete' : splitPartTitle(activePart);
+    bindingState.textContent = sel.splitNeedsRefresh ? 'Job quantity needed' : allBound ? 'Bind complete' : splitPartTitle(activePart);
     bindingNote.textContent = activePart
       ? (activePart.number === 2 ? 'Pair 1 queued. Scan Green Start and Red End for Pair 2. You can reuse the same QR codes.' : 'Scan Green Start and Red End for Pair 1.')
       : 'Both pairs are bound. Check the print queue for delivery status or to retry a label.';
+    if (sel.splitNeedsRefresh) bindingNote.textContent = 'Rescan this JTC to load its job quantity before printing.';
   } else if (sel) {
     const complete = rework ? sel.boundRework : (sel.boundStart && sel.boundEnd);
-    printBtn.disabled = !complete;
-    printBtn.textContent = complete ? (sel.printed ? 'Reprint label' : 'Print label') : 'Scan QR to print';
+    printBtn.disabled = !complete || (sel.labelCount === 1 && (sel.printed || bindingReleasing || !!layoutSaving));
+    printBtn.textContent = complete ? (sel.printed ? (sel.labelCount === 1 ? 'Label queued' : 'Reprint label') : 'Print label') : 'Scan QR to print';
     const done = rework
       ? (sel.boundRework ? 1 : 0)
       : (sel.boundStart ? 1 : 0) + (sel.boundEnd ? 1 : 0);
@@ -1152,6 +1275,14 @@ function renderBinding(jobs) {
       : (rework
         ? (done === 1 ? 'Ready' : '0/1 tag scanned')
         : (done === 2 ? 'Ready' : done + '/2 tags scanned'));
+    if (sel.labelCount === 1) {
+      if (complete) bindingState.textContent = 'Bind complete';
+      bindingNote.textContent = sel.printed
+        ? 'Check the print queue for delivery status or to retry the label.'
+        : 'Scan Green Start and Red End to print one label for the full job.';
+    } else if (!rework && currentLocation?.splitPartOneQty != null && !sel.printed) {
+      bindingNote.textContent = 'Rescan this JTC to choose one or two labels.';
+    }
   } else {
     bindingState.textContent = '';
   }
@@ -1194,7 +1325,7 @@ function renderBinding(jobs) {
     li.append(head, rm);
 
     if (j.parts) {
-      li.appendChild(renderSplitPairs(j, isSel, previewJtc, jobs));
+      li.appendChild(renderSplitPairs(j, isSel, jobs));
     } else if (isSel) {
       const tasks = document.createElement('div');
       tasks.className = 'b-tasks';
@@ -1216,7 +1347,7 @@ function renderBinding(jobs) {
   // Auto-release once the SELECTED item's tags are both in (hands-free path); the
   // Print button is the manual equivalent. The server's `printed` flag stops repeats.
   const ready = activePart ? activePart.startTag && activePart.endTag : rework ? sel?.boundRework : sel?.boundStart && sel?.boundEnd;
-  if (ready && !sel.printed && !bindingReleasing && bindingAutoReleaseBlockedId !== releaseKey) void bindingReleasePrint();
+  if (ready && !sel.printed && !sel.splitNeedsRefresh && !splitEdit && !layoutSaving && !bindingReleasing && bindingAutoReleaseBlockedId !== releaseKey) void bindingReleasePrint();
 }
 
 function taskPill(colour, text, done, hint) {
@@ -1235,9 +1366,11 @@ function taskPill(colour, text, done, hint) {
 }
 
 async function bindingScan(token) {
+  if (splitEdit) { showBindingError('Apply or cancel the split before scanning QR tags.'); return; }
+  if (layoutSaving) { showBindingError('Wait for the label count to save, then scan again.'); return; }
   const loc = currentLocation, epoch = locationEpoch;
   const partNumber = selectedBinding?.currentPart;
-  if (loc?.splitPartOneQty != null && selectedBindingId == null) { showBindingError('Select the split job before scanning its QR tags.'); return; }
+  if (loc?.splitPartOneQty != null && selectedBindingId == null) { showBindingError('Select the Work Order before scanning its QR tags.'); return; }
   try {
     const res = await fetch('/api/binding/scan', {
       method: 'POST',
@@ -1256,10 +1389,12 @@ async function bindingScan(token) {
 }
 
 async function bindingReleasePrint() {
-  if (bindingReleasing) return;
+  if (bindingReleasing || splitEdit || layoutSaving) return;
   bindingReleasing = true;
+  syncSplitEditor(selectedBinding);
   const loc = currentLocation, epoch = locationEpoch, bindingId = selectedBindingId;
   const partNumber = selectedBinding?.currentPart;
+  const isWorkOrder = selectedBinding?.labelCount != null;
   const releaseKey = partNumber ? bindingId + ':' + partNumber : bindingId;
   try {
     const res = await fetch('/api/binding/print', {
@@ -1270,7 +1405,7 @@ async function bindingReleasePrint() {
     const body = await res.json().catch(() => ({}));
     if (!sameLocation(loc, epoch)) { refreshQueue(); return; }
     if (!body.ok) {
-      if (partNumber || body.alreadyBound) bindingAutoReleaseBlockedId = releaseKey;
+      if (isWorkOrder || body.alreadyBound) bindingAutoReleaseBlockedId = releaseKey;
       showBindingError(body.error || 'Could not release the label.');
       return;
     }
@@ -1282,10 +1417,10 @@ async function bindingReleasePrint() {
     refreshQueue();
   } catch (e) {
     if (sameLocation(loc, epoch)) {
-      if (partNumber) bindingAutoReleaseBlockedId = releaseKey;
+      if (isWorkOrder) bindingAutoReleaseBlockedId = releaseKey;
       showBindingError(e.message);
     }
-  } finally { bindingReleasing = false; }
+  } finally { bindingReleasing = false; syncSplitEditor(selectedBinding); }
 }
 
 async function removeBinding(id) {

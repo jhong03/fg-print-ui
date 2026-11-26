@@ -12,7 +12,7 @@ const locations = require('./locations');
 const printQueue = require('./printQueue');
 const bindingQueue = require('./bindingQueue');
 const autoPrint = require('./autoPrint');
-const { isLeakTest, resolvePainting, prependProcessCode, applyWorkOrderFields } = require('./paintingFlow');
+const { isLeakTest, resolvePainting, prependProcessCode, applyWorkOrderFields, workOrderQuantity } = require('./paintingFlow');
 const { fail } = require('./localStore');
 const { registerSettings, localSettingsOnly } = require('./settingsRoutes');
 
@@ -127,14 +127,19 @@ app.get('/api/jtc', async (req, res) => {
 async function previewRecord(req, loc, no) {
   if (req.query.bindingId != null) {
     const job = bindingQueue.list(loc.id).find((j) => j.id === Number(req.query.bindingId));
-    const splitPart = job?.parts?.find((p) => p.number === Number(req.query.part));
-    if (!splitPart) throw fail('This split label is no longer available.', 404);
+    if (!job || job.bindingMode !== 'normal') throw fail('This QR binding is no longer available.', 404);
+    const splitPart = job.parts?.find((p) => p.number === Number(req.query.part));
+    if (job.parts && !splitPart) throw fail('This split label is no longer available.', 404);
     const painting = await db.getOne(job.paintingJtc);
     if (!painting) throw fail('Painting JTC not found.', 404);
     const target = { ...painting };
-    prependProcessCode(target, loc);
-    applyWorkOrderFields(target);
-    return { target, sourceJtc: job.sourceJtc, splitPart };
+    if (job.sourceJtc || job.labelCount != null) {
+      prependProcessCode(target, loc);
+      applyWorkOrderFields(target);
+    }
+    if (job.labelCount === 1) target.qty = job.splitTotal;
+    const { startTag, endTag } = splitPart || job;
+    return { target, sourceJtc: job.sourceJtc, splitPart, qrTags: { startTag, endTag } };
   }
   const record = await db.getOne(no);
   if (!record) throw fail('JTC not found', 404);
@@ -149,9 +154,9 @@ app.get('/api/print/preview', async (req, res) => {
     const loc = resolveLocation(req);
     // Welding->Painting: a Leak-Test JTC on a weldingToPainting tab previews/prints
     // its Painting parent's label (see paintingFlow.js).
-    const { target, splitPart } = await previewRecord(req, loc, no);
+    const { target, splitPart, qrTags } = await previewRecord(req, loc, no);
     const template = await getTemplate(loc.templateId);
-    const tspl = renderTspl(template, mapRecordToFields(target, loc.templateId), { ...printOptsFor(loc), splitPart });
+    const tspl = renderTspl(template, mapRecordToFields(target, loc.templateId, qrTags), { ...printOptsFor(loc), splitPart });
     res.type('text/plain').send(tspl);
   } catch (err) {
     console.error('[preview]', err.message);
@@ -168,9 +173,9 @@ app.get('/api/label/model', async (req, res) => {
     const loc = resolveLocation(req);
     // Welding->Painting: preview the Painting parent's label; tell the UI where it
     // came from so it can show "showing Painting label — from Welding JTC …".
-    const { target, sourceJtc, splitPart } = await previewRecord(req, loc, no);
+    const { target, sourceJtc, splitPart, qrTags } = await previewRecord(req, loc, no);
     const template = await getTemplate(loc.templateId);
-    res.json({ ...buildModel(template, target, { ...printOptsFor(loc), splitPart }), sourceJtc, printJtc: target.jtcNo });
+    res.json({ ...buildModel(template, target, { ...printOptsFor(loc), splitPart, qrTags }), sourceJtc, printJtc: target.jtcNo });
   } catch (err) {
     console.error('[label/model]', err.message);
     res.status(err.status || 500).json({ error: err.message });
@@ -189,6 +194,7 @@ app.post('/api/print', asyncHandler(async (req, res) => {
   let jtcToQueue = no;
   let sourceJtc = null;
   let record;
+  let jobQuantity;
   try {
     record = await db.getOne(no);
     // Model guard: a tab with a models list only handles its own model(s). A
@@ -225,6 +231,7 @@ app.post('/api/print', asyncHandler(async (req, res) => {
       const t = await resolvePainting(record, loc, db);
       jtcToQueue = t.record.jtcNo;
       sourceJtc = t.sourceJtc;
+      jobQuantity = workOrderQuantity(t.record);
     }
   } catch (err) {
     if (loc.splitPartOneQty != null) throw fail('Could not look up the Leak Test and Painting jobs. Try again.', 503);
@@ -240,7 +247,7 @@ app.post('/api/print', asyncHandler(async (req, res) => {
   // QR-gated tab: don't print — STAGE the job for binding. It reaches the print
   // queue only after the operator scans this workcell's Green + Red QR tags.
   if (loc.requireQrBinding || loc.reworkQrBinding) {
-    const b = bindingQueue.add(jtcToQueue, loc.id, sourceJtc, loc.bindingMode, loc.splitPartOneQty);
+    const b = bindingQueue.add(jtcToQueue, loc.id, sourceJtc, loc.bindingMode, loc, jobQuantity);
     return res.json({ success: true, binding: true, bindingMode: loc.bindingMode, id: b.id, printJtc: b.paintingJtc, sourceJtc: b.sourceJtc });
   }
   const r = printQueue.add(jtcToQueue, loc.id, sourceJtc);
@@ -277,6 +284,16 @@ app.post('/api/queue/clear-spooler', localSettingsOnly, async (req, res, next) =
 // location so a station only sees its own staged work.
 app.get('/api/binding', (req, res) => {
   res.json({ jobs: bindingQueue.list(resolveLocation(req).id) });
+});
+app.put('/api/binding/split', (req, res) => {
+  const loc = resolveLocation(req);
+  bindingQueue.updateSplit(loc.id, req.body?.id, req.body?.partOneQty, req.body?.previousQty);
+  res.json({ jobs: bindingQueue.list(loc.id) });
+});
+app.put('/api/binding/label-count', (req, res) => {
+  const loc = resolveLocation(req);
+  bindingQueue.updateLabelCount(loc, req.body?.id, req.body?.labelCount, req.body?.previousLabelCount);
+  res.json({ jobs: bindingQueue.list(loc.id) });
 });
 // Validate one scanned QR token against the active item; records Start/End.
 // A mismatch returns 200 with { ok:false, error } — it's a normal, retryable
@@ -322,7 +339,7 @@ app.post('/api/auto/test', async (req, res) => {
     res.json(await autoPrint.testTrigger(jtcNo, override));
   } catch (err) {
     console.error('[auto/test]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

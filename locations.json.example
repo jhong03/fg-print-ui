@@ -7,7 +7,7 @@
 //
 //   id           unique key, used internally and remembered per station
 //   name         what shows on the tab
-//   templateId   MES label template number to print         (default LABEL_TEMPLATE_ID)
+//   templateId   MES label template number (defaults to 1 for Work Orders, otherwise LABEL_TEMPLATE_ID)
 //   variant      "qc" (with QC CHOP box) | "plain" (without) (default LABEL_VARIANT)
 //   barcodeNudge horizontal barcode calibration, dots        (default per-variant .env nudge)
 //   printerType  "tsc" | "hprt"                              (default PRINTER_TYPE)
